@@ -643,7 +643,7 @@ end
 -- WEBHOOK FUNCTIONS
 -- ================================================================
 
-local function SendDiscordWebhook(url, message)
+local function SendDiscordWebhook(url, payload)
     if not url or url == "" then
         Log("[Webhook] URL kosong!")
         return false
@@ -653,7 +653,7 @@ local function SendDiscordWebhook(url, message)
             Url     = url,
             Method  = "POST",
             Headers = { ["Content-Type"] = "application/json" },
-            Body    = HttpService:JSONEncode({ content = message }),
+            Body    = HttpService:JSONEncode(payload),
         })
     end)
     if ok then Log("[Webhook] Sent OK")
@@ -677,7 +677,7 @@ local function FlushWebhookQueue()
         username   = "LuluXBee",
         avatar_url = "https://i.imgur.com/mwf869e.jpeg",
         embeds = {{
-            title     = " Auto Buy Seed",
+            title     = "🌸 Auto Buy Seed",
             color     = 0xB373F8,
             fields    = fields,
             footer    = { text = "LuluXBee v0.2.0" },
@@ -728,14 +728,14 @@ local function SendSeedWebhook()
         desc = "*Tas kosong*"
     else
         for _, s in ipairs(seeds) do
-            desc = desc .. " **" .. s.Name .. "** — x" .. s.Count .. "\n"
+            desc = desc .. "🌱 **" .. s.Name .. "** — x" .. s.Count .. "\n"
         end
     end
     SendDiscordWebhook(WebhookURL, {
         username   = "LuluXBee",
         avatar_url = "https://i.imgur.com/mwf869e.jpeg",
         embeds = {{
-            title       = "Seeds in Bag",
+            title       = "🎒 Seeds in Bag",
             description = desc,
             color       = 0x57F287,
             footer      = { text = "Total: " .. #seeds .. " jenis • LuluXBee v0.2.0" },
@@ -747,37 +747,37 @@ end
 -- Status Webhook: kirim status semua fitur yang aktif
 local function SendStatusWebhook()
     if WebhookURL == "" then return end
-    local function onoff(v) return v and " ON" or " OFF" end
+    local function onoff(v) return v and "🟢 ON" or "🔴 OFF" end
 
     local buyFlowerVal = onoff(AutoBuySeedEnabled)
     if AutoBuySeedEnabled then
         if BuyAllFlower then
-            buyFlowerVal = " ON (All Seeds)"
+            buyFlowerVal = "🟢 ON (All Seeds)"
         elseif #SelectedBuyFlowers > 0 then
-            buyFlowerVal = " ON\n" .. table.concat(SelectedBuyFlowers, ", ")
+            buyFlowerVal = "🟢 ON\n" .. table.concat(SelectedBuyFlowers, ", ")
         end
     end
 
     local buyItemsVal = onoff(AutoBuyItemsEnabled)
     if AutoBuyItemsEnabled then
         if BuyAllItems then
-            buyItemsVal = " ON (All Items)"
+            buyItemsVal = "🟢 ON (All Items)"
         elseif #selectedBuyItems > 0 then
-            buyItemsVal = " ON\n" .. table.concat(selectedBuyItems, ", ")
+            buyItemsVal = "🟢 ON\n" .. table.concat(selectedBuyItems, ", ")
         end
     end
 
     local plantVal = onoff(IsAutoPlantRunning)
     if IsAutoPlantRunning then
         local plotInfo = PlantAllPlots and "All Plots" or ("Plot " .. (SelectedPlot or "?"))
-        plantVal = " ON — " .. plotInfo
+        plantVal = "🟢 ON — " .. plotInfo
     end
 
     SendDiscordWebhook(WebhookURL, {
         username   = "LuluXBee",
         avatar_url = "https://i.imgur.com/mwf869e.jpeg",
         embeds = {{
-            title = "Script Status",
+            title = "📊 Script Status",
             color = 0x5865F2,
             fields = {
                 { name = "Auto Claim",      value = onoff(AutoClaimEnabled),    inline = true },
@@ -1842,8 +1842,17 @@ tabWebhook:Accordion("Webhook Settings", function(sec)
             win:luluNotify("Isi Webhook URL dulu!", Color3.fromRGB(220, 50, 50))
             done(); return
         end
-        local msg = "[LuluXBee] Webhook Test\nWebhook is working!\nTime: " .. os.date("%Y-%m-%d %H:%M:%S")
-        local ok = SendDiscordWebhook(WebhookURL, msg)
+        local ok = SendDiscordWebhook(WebhookURL, {
+            username   = "LuluXBee",
+            avatar_url = "https://i.imgur.com/mwf869e.jpeg",
+            embeds = {{
+                title       = "✅ Webhook Test",
+                description = "Webhook is working!",
+                color       = 0x57F287,
+                footer      = { text = "LuluXBee v0.2.0" },
+                timestamp   = os.date("!%Y-%m-%dT%H:%M:%S")
+            }}
+        })
         win:luluNotify(
             ok and "Test dikirim ke Discord!" or "Gagal kirim! Cek URL",
             ok and Color3.fromRGB(40, 180, 80) or Color3.fromRGB(220, 50, 50)
