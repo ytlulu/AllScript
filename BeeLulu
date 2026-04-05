@@ -67,10 +67,10 @@ local ShopItems = {
 -- ================================================================
 local PlotCoordinates = {
     {name = "Awal",    x = -234.14993286132813, y = 3.999999761581421,  z = -452.236572265625},
-    {name = "plot1.1", x = -274.7723693847656,  y = 4.499999523162842,  z = -463.15179443359377},
-    {name = "plot1.2", x = -274.2889404296875,  y = 4.499999523162842,  z = -489.54351806640627},
-    {name = "plot1.3", x = -244.24879455566407, y = 4.499999523162842,  z = -488.979248046875},
-    {name = "plot1.4", x = -244.14617919921876, y = 4.399999618530273,  z = -462.7499084472656},
+    {name = "plot1.4", x = -274.7723693847656,  y = 4.499999523162842,  z = -463.15179443359377},
+    {name = "plot1.1", x = -274.2889404296875,  y = 4.499999523162842,  z = -489.54351806640627},
+    {name = "plot1.2", x = -244.24879455566407, y = 4.499999523162842,  z = -488.979248046875},
+    {name = "plot1.3", x = -244.14617919921876, y = 4.399999618530273,  z = -462.7499084472656},
     {name = "plot2.1", x = -224.35093688964845, y = 4.5199995040893559, z = -489.9873962402344},
     {name = "plot2.2", x = -193.6008758544922,  y = 4.399999618530273,  z = -489.3583984375},
     {name = "plot2.3", x = -193.890625,         y = 4.499999523162842,  z = -463.09619140625},
@@ -735,7 +735,7 @@ local function SendSeedWebhook()
         username   = "LuluXBee",
         avatar_url = "https://i.imgur.com/mwf869e.jpeg",
         embeds = {{
-            title       = "🎒 Seeds in Bag",
+            title       = "🌸 Seeds in Bag",
             description = desc,
             color       = 0x57F287,
             footer      = { text = "Total: " .. #seeds .. " jenis • LuluXBee v0.2.0" },
@@ -777,7 +777,7 @@ local function SendStatusWebhook()
         username   = "LuluXBee",
         avatar_url = "https://i.imgur.com/mwf869e.jpeg",
         embeds = {{
-            title = "📊 Script Status",
+            title = "🌸 Script Status",
             color = 0x5865F2,
             fields = {
                 { name = "Auto Claim",      value = onoff(AutoClaimEnabled),    inline = true },
@@ -1764,57 +1764,48 @@ tabQuest:Accordion("Debug", function(sec)
     end, {color = Color3.fromRGB(100, 110, 140)}, {locked = true})
 end, {locked = true})
 
+-- Tambahin di atas (global / luar loop)
+lastSeasonSignature = ""
+
 spawn(function()
     while true do
         task.wait(1)
+
         if ShowSeasonQuestEnabled then
             local tasks = GetSeasonTasks()
-            if #tasks ~= lastSeasonCount then
+
+            -- 🔥 buat signature (deteksi perubahan isi & urutan)
+            local signature = ""
+            for _, t in ipairs(tasks) do
+                signature = signature .. t.desc .. tostring(t.isDone) .. tostring(t.count)
+            end
+
+            if signature ~= lastSeasonSignature then
+                -- REBUILD UI
                 grp_season:Clear()
                 pnl_seasonSlots = {}
+
                 grp_season:Header("Season Quest")
+
                 for _, t in ipairs(tasks) do
                     local countTxt = t.isDone and "done" or t.count
+                    local col = t.isDone and Color3.fromRGB(40, 210, 90) or Color3.fromRGB(80, 160, 255)
+
                     local sv = grp_season:QuestLine(t.desc, countTxt)
+                    sv(countTxt, col)
+
                     table.insert(pnl_seasonSlots, sv)
                 end
-                lastSeasonCount = #tasks
+
+                lastSeasonSignature = signature
             else
+                -- UPDATE SAJA
                 for i, t in ipairs(tasks) do
                     local countTxt = t.isDone and "done" or t.count
                     local col = t.isDone and Color3.fromRGB(40, 210, 90) or Color3.fromRGB(80, 160, 255)
-                    if pnl_seasonSlots[i] then pnl_seasonSlots[i](countTxt, col) end
-                end
-            end
-        end
-        if TrackSpringQuestEnabled then
-            local springData = GetSpringData()
-            local newFlowers = {}
-            for fn in pairs(springData) do table.insert(newFlowers, fn) end
-            table.sort(newFlowers)
-            local totalNeeded = 0
-            for _, fn in ipairs(newFlowers) do
-                totalNeeded = totalNeeded + #(springData[fn])
-            end
-            if totalNeeded ~= lastSpringTotal then
-                grp_spring:Clear()
-                pnl_springDynamic = {}
-                for _, fn in ipairs(newFlowers) do
-                    grp_spring:Header(fn)
-                    pnl_springDynamic[fn] = {}
-                    for _, txt in ipairs(springData[fn]) do
-                        local sv = grp_spring:Line(txt)
-                        table.insert(pnl_springDynamic[fn], sv)
-                    end
-                end
-                lastSpringTotal = totalNeeded
-            else
-                for _, fn in ipairs(newFlowers) do
-                    local slots = pnl_springDynamic[fn]
-                    if slots then
-                        for j, txt in ipairs(springData[fn]) do
-                            if slots[j] then slots[j].Text = txt end
-                        end
+
+                    if pnl_seasonSlots[i] then
+                        pnl_seasonSlots[i](countTxt, col)
                     end
                 end
             end
