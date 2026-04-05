@@ -242,7 +242,6 @@ local HideAllEnabled = false
 local WebhookURL            = ""
 local WebhookSeedEnabled    = false
 local SelectedWebhookSeeds  = {}
-local WebhookSeedThread     = nil
 
 -- ================================================================
 -- QUEST VARIABLES
@@ -503,20 +502,25 @@ local function BuyAllStock(flowerName)
 end
 
 -- AutoBuySeeds sekarang pakai SelectedBuyFlowers (dari MultiDropdown)
+-- Return: bool, table {name, count}
 local function AutoBuySeeds(list)
-    if not list or #list == 0 then return false end
+    if not list or #list == 0 then return false, {} end
 
-    local bought = false
+    local bought     = false
+    local boughtList = {}
 
     for _, flowerName in ipairs(list) do
         if GetFlowerStock(flowerName) > 0 then
-            BuyAllStock(flowerName)
+            local n = BuyAllStock(flowerName)
+            if n > 0 then
+                bought = true
+                table.insert(boughtList, {name = flowerName, count = n})
+            end
             task.wait(0.5)
-            bought = true
         end
     end
 
-    return bought
+    return bought, boughtList
 end
 
 -- buy items
@@ -580,6 +584,12 @@ end
 -- ================================================================
 -- WEBHOOK FUNCTIONS
 -- ================================================================
+
+-- Queue: akumulasi seed yang terbeli sebelum dikirim ke Discord
+local WebhookBoughtQueue = {}
+local WebhookLastBuyTime = 0
+local WebhookFlushThread = nil
+
 local function SendDiscordWebhook(url, message)
     if not url or url == "" then
         Log("[Webhook] URL kosong!")
@@ -587,10 +597,10 @@ local function SendDiscordWebhook(url, message)
     end
     local ok, err = pcall(function()
         request({
-            Url    = url,
-            Method = "POST",
+            Url     = url,
+            Method  = "POST",
             Headers = { ["Content-Type"] = "application/json" },
-            Body   = HttpService:JSONEncode({ content = message }),
+            Body    = HttpService:JSONEncode({ content = message }),
         })
     end)
     if ok then
@@ -601,38 +611,70 @@ local function SendDiscordWebhook(url, message)
     return ok
 end
 
--- Loop: cek stock seed yang dipilih, beli, dan kirim notif ke Discord
-local function StartWebhookSeedLoop()
-    WebhookSeedThread = task.spawn(function()
-        while WebhookSeedEnabled do
-            if #SelectedWebhookSeeds > 0 then
-                local bought = {}
-                for _, flowerName in ipairs(SelectedWebhookSeeds) do
-                    local stock = GetFlowerStock(flowerName)
-                    if stock > 0 then
-                        local n = BuyAllStock(flowerName)
-                        if n > 0 then
-                            table.insert(bought, flowerName .. " x" .. n)
-                            task.wait(0.3)
-                        end
-                    end
-                end
+-- Kirim queue ke Discord lalu bersihkan
+local function FlushWebhookQueue()
+    if #WebhookBoughtQueue == 0 then return end
+    if WebhookURL == "" then
+        WebhookBoughtQueue = {}
+        return
+    end
 
-                if #bought > 0 then
-                    local msg = "[LuluXBee] Webhook Seed\nSeed dibeli:\n"
-                    for _, b in ipairs(bought) do
-                        msg = msg .. "  - " .. b .. "\n"
-                    end
-                    msg = msg .. "Time: " .. os.date("%Y-%m-%d %H:%M:%S")
-                    SendDiscordWebhook(WebhookURL, msg)
-                end
+    -- Bangun summary
+    local parts = {}
+    for _, entry in ipairs(WebhookBoughtQueue) do
+        table.insert(parts, entry.name .. " x" .. entry.count)
+    end
+    local summary = table.concat(parts, ", ")
 
-                task.wait(10)
-            else
-                task.wait(5)
+    -- Notif in-game
+    win:luluNotify("Buy: " .. summary, Color3.fromRGB(40, 180, 80))
+    task.wait(1.5)
+    win:luluNotify("Webhook buy detect, send to Discord!", Color3.fromRGB(40, 120, 255))
+
+    -- Kirim ke Discord
+    local msg = "[LuluXBee] Auto Buy Seed\n"
+        .. "Buy: " .. summary .. "\n"
+        .. "Time: " .. os.date("%Y-%m-%d %H:%M:%S")
+    SendDiscordWebhook(WebhookURL, msg)
+
+    WebhookBoughtQueue = {}
+end
+
+-- Dipanggil setiap kali auto buy selesai satu ronde
+-- boughtList = { {name, count}, ... }
+local function TrackWebhookBuy(boughtList)
+    if not WebhookSeedEnabled then return end
+    if WebhookURL == "" then return end
+
+    -- Filter: hanya seed yang ada di SelectedWebhookSeeds
+    -- Kalau SelectedWebhookSeeds kosong = semua seed masuk
+    for _, entry in ipairs(boughtList) do
+        local match = (#SelectedWebhookSeeds == 0)
+        if not match then
+            for _, chosen in ipairs(SelectedWebhookSeeds) do
+                if chosen == entry.name then
+                    match = true
+                    break
+                end
             end
         end
-        WebhookSeedThread = nil
+        if match then
+            table.insert(WebhookBoughtQueue, entry)
+        end
+    end
+
+    if #WebhookBoughtQueue == 0 then return end
+
+    WebhookLastBuyTime = tick()
+
+    -- Reset flush timer: tunggu 5 detik idle setelah buy terakhir
+    if WebhookFlushThread then
+        task.cancel(WebhookFlushThread)
+        WebhookFlushThread = nil
+    end
+    WebhookFlushThread = task.delay(5, function()
+        WebhookFlushThread = nil
+        FlushWebhookQueue()
     end)
 end
 
@@ -1281,7 +1323,19 @@ end)
                     local list = getTargetList()
 
                     if #list > 0 then
-                        AutoBuySeeds(list)
+                        local ok, boughtList = AutoBuySeeds(list)
+
+                        if ok and #boughtList > 0 then
+                            -- Bangun summary notif buy success
+                            local parts = {}
+                            for _, entry in ipairs(boughtList) do
+                                table.insert(parts, entry.name .. " x" .. entry.count)
+                            end
+                            win:luluNotify("Buy: " .. table.concat(parts, ", "), Color3.fromRGB(40, 180, 80))
+
+                            -- Kirim ke webhook tracker
+                            TrackWebhookBuy(boughtList)
+                        end
                     end
 
                     task.wait(BuyFlowerDelay)
@@ -1790,12 +1844,13 @@ tabWebhook:Accordion("Webhook Seed", function(sec)
         table.insert(WebhookSeedOpts, item.name)
     end
 
+    sec:Label("Kosongkan = semua seed yang terbeli masuk webhook.", {size = 11, color = Color3.fromRGB(160, 160, 200)})
+
     sec:MultiDropdown("Chose Seed", WebhookSeedOpts, {}, function(selected)
         SelectedWebhookSeeds = {}
         for _, name in ipairs(selected) do
             table.insert(SelectedWebhookSeeds, name)
         end
-        Log("[Webhook] Seeds dipilih: " .. #SelectedWebhookSeeds)
     end)
 
     sec:Toggle("Start Webhook", false, function(v)
@@ -1807,17 +1862,16 @@ tabWebhook:Accordion("Webhook Seed", function(sec)
                 WebhookSeedEnabled = false
                 return
             end
-            if #SelectedWebhookSeeds == 0 then
-                win:luluNotify("Pilih seed dulu!", Color3.fromRGB(220, 50, 50))
-                WebhookSeedEnabled = false
-                return
-            end
-            if WebhookSeedThread then return end
-            StartWebhookSeedLoop()
+            WebhookBoughtQueue = {}
             win:luluNotify("Webhook Seed aktif!", Color3.fromRGB(40, 180, 80))
         else
-            WebhookSeedEnabled = false
-            win:luluNotify("Webhook Seed dihentikan", Color3.fromRGB(220, 50, 50))
+            -- Cancel flush timer yang pending
+            if WebhookFlushThread then
+                task.cancel(WebhookFlushThread)
+                WebhookFlushThread = nil
+            end
+            WebhookBoughtQueue = {}
+            win:luluNotify("Webhook Seed dimatikan", Color3.fromRGB(220, 50, 50))
         end
     end)
 
