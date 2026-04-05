@@ -665,15 +665,25 @@ end
 local function FlushWebhookQueue()
     if #WebhookBoughtQueue == 0 then return end
     if WebhookURL == "" then WebhookBoughtQueue = {} return end
-    local parts = {}
+    local fields = {}
     for _, entry in ipairs(WebhookBoughtQueue) do
-        table.insert(parts, entry.name .. " x" .. entry.count)
+        table.insert(fields, {
+            name   = entry.name,
+            value  = "x" .. entry.count,
+            inline = true
+        })
     end
-    local summary = table.concat(parts, ", ")
-    local msg = "[LuluXBee] Auto Buy Seed\n"
-        .. "Buy: " .. summary .. "\n"
-        .. "Time: " .. os.date("%Y-%m-%d %H:%M:%S")
-    SendDiscordWebhook(WebhookURL, msg)
+    SendDiscordWebhook(WebhookURL, {
+        username   = "LuluXBee",
+        avatar_url = "https://i.imgur.com/mwf869e.jpeg",
+        embeds = {{
+            title     = " Auto Buy Seed",
+            color     = 0xB373F8,
+            fields    = fields,
+            footer    = { text = "LuluXBee v0.2.0" },
+            timestamp = os.date("!%Y-%m-%dT%H:%M:%S")
+        }}
+    })
     WebhookBoughtQueue = {}
 end
 
@@ -713,83 +723,77 @@ local function SendSeedWebhook()
             end
         end
     end
-    local lines = {}
-    table.insert(lines, "[LuluXBee] Seed Webhook")
-    table.insert(lines, "Time: " .. os.date("%Y-%m-%d %H:%M:%S"))
-    table.insert(lines, "")
+    local desc = ""
     if #seeds == 0 then
-        table.insert(lines, "Bag: (kosong)")
+        desc = "*Tas kosong*"
     else
-        table.insert(lines, "=== Seeds in Bag ===")
         for _, s in ipairs(seeds) do
-            table.insert(lines, s.Name .. "  x" .. s.Count)
+            desc = desc .. " **" .. s.Name .. "** — x" .. s.Count .. "\n"
         end
-        table.insert(lines, "Total: " .. #seeds .. " jenis seed")
     end
-    SendDiscordWebhook(WebhookURL, table.concat(lines, "\n"))
+    SendDiscordWebhook(WebhookURL, {
+        username   = "LuluXBee",
+        avatar_url = "https://i.imgur.com/mwf869e.jpeg",
+        embeds = {{
+            title       = "Seeds in Bag",
+            description = desc,
+            color       = 0x57F287,
+            footer      = { text = "Total: " .. #seeds .. " jenis • LuluXBee v0.2.0" },
+            timestamp   = os.date("!%Y-%m-%dT%H:%M:%S")
+        }}
+    })
 end
 
 -- Status Webhook: kirim status semua fitur yang aktif
 local function SendStatusWebhook()
     if WebhookURL == "" then return end
-    local lines = {}
-    table.insert(lines, "[LuluXBee] Status Webhook")
-    table.insert(lines, "Time: " .. os.date("%Y-%m-%d %H:%M:%S"))
-    table.insert(lines, "")
-    table.insert(lines, "=== Toggle Status ===")
-    table.insert(lines, "Auto Claim      : " .. (AutoClaimEnabled    and "✅ ON" or "❌ OFF"))
-    table.insert(lines, "Auto Sell       : " .. (AutoSellEnabled     and "✅ ON" or "❌ OFF"))
-    table.insert(lines, "Auto Spawn Bee  : " .. (AutoSpawnBeeEnabled and "✅ ON" or "❌ OFF"))
-    table.insert(lines, "Auto Trade      : " .. (AutoTradeEnabled    and "✅ ON" or "❌ OFF"))
-    table.insert(lines, "")
-    -- Auto Buy Flower detail
+    local function onoff(v) return v and " ON" or " OFF" end
+
+    local buyFlowerVal = onoff(AutoBuySeedEnabled)
     if AutoBuySeedEnabled then
         if BuyAllFlower then
-            table.insert(lines, "Auto Buy Flower : ✅ ON (All Seeds)")
+            buyFlowerVal = " ON (All Seeds)"
         elseif #SelectedBuyFlowers > 0 then
-            table.insert(lines, "Auto Buy Flower : ✅ ON")
-            table.insert(lines, "  Seeds: " .. table.concat(SelectedBuyFlowers, ", "))
-        else
-            table.insert(lines, "Auto Buy Flower : ✅ ON (no seed selected)")
+            buyFlowerVal = " ON\n" .. table.concat(SelectedBuyFlowers, ", ")
         end
-    else
-        table.insert(lines, "Auto Buy Flower : ❌ OFF")
     end
-    -- Auto Buy Items detail
+
+    local buyItemsVal = onoff(AutoBuyItemsEnabled)
     if AutoBuyItemsEnabled then
         if BuyAllItems then
-            table.insert(lines, "Auto Buy Items  : ✅ ON (All Items)")
+            buyItemsVal = " ON (All Items)"
         elseif #selectedBuyItems > 0 then
-            table.insert(lines, "Auto Buy Items  : ✅ ON")
-            table.insert(lines, "  Items: " .. table.concat(selectedBuyItems, ", "))
-        else
-            table.insert(lines, "Auto Buy Items  : ✅ ON (no item selected)")
+            buyItemsVal = " ON\n" .. table.concat(selectedBuyItems, ", ")
         end
-    else
-        table.insert(lines, "Auto Buy Items  : ❌ OFF")
     end
-    -- Auto Plant detail
+
+    local plantVal = onoff(IsAutoPlantRunning)
     if IsAutoPlantRunning then
-        if #SelectedPlantFlowers > 0 then
-            table.insert(lines, "Auto Plant      : ✅ ON")
-            table.insert(lines, "  Seeds: " .. table.concat(SelectedPlantFlowers, ", "))
-        else
-            table.insert(lines, "Auto Plant      : ✅ ON (All Seeds)")
-        end
-        if PlantAllPlots then
-            table.insert(lines, "  Plot: All Plots")
-        else
-            table.insert(lines, "  Plot: Plot " .. (SelectedPlot or "?"))
-        end
-    else
-        table.insert(lines, "Auto Plant      : ❌ OFF")
+        local plotInfo = PlantAllPlots and "All Plots" or ("Plot " .. (SelectedPlot or "?"))
+        plantVal = " ON — " .. plotInfo
     end
-    table.insert(lines, "")
-    table.insert(lines, "=== Webhook Status ===")
-    table.insert(lines, "Buy Webhook    : " .. (BuyWebhookEnabled    and "✅ ON" or "❌ OFF"))
-    table.insert(lines, "Seed Webhook   : " .. (SeedWebhookEnabled   and "✅ ON" or "❌ OFF") .. " (delay: " .. SeedWebhookDelay .. " menit)")
-    table.insert(lines, "Status Webhook : ✅ ON (delay: " .. StatusWebhookDelay .. " menit)")
-    SendDiscordWebhook(WebhookURL, table.concat(lines, "\n"))
+
+    SendDiscordWebhook(WebhookURL, {
+        username   = "LuluXBee",
+        avatar_url = "https://i.imgur.com/mwf869e.jpeg",
+        embeds = {{
+            title = "Script Status",
+            color = 0x5865F2,
+            fields = {
+                { name = "Auto Claim",      value = onoff(AutoClaimEnabled),    inline = true },
+                { name = "Auto Sell",       value = onoff(AutoSellEnabled),     inline = true },
+                { name = "Auto Spawn Bee",  value = onoff(AutoSpawnBeeEnabled), inline = true },
+                { name = "Auto Trade",      value = onoff(AutoTradeEnabled),    inline = true },
+                { name = "Auto Buy Flower", value = buyFlowerVal,               inline = true },
+                { name = "Auto Buy Items",  value = buyItemsVal,                inline = true },
+                { name = "Auto Plant",      value = plantVal,                   inline = true },
+                { name = "Buy Webhook",     value = onoff(BuyWebhookEnabled),   inline = true },
+                { name = "Seed Webhook",    value = onoff(SeedWebhookEnabled) .. " (" .. SeedWebhookDelay .. " mnt)", inline = true },
+            },
+            footer    = { text = "LuluXBee v0.2.0" },
+            timestamp = os.date("!%Y-%m-%dT%H:%M:%S")
+        }}
+    })
 end
 
 -- ================================================================
@@ -1881,7 +1885,7 @@ tabWebhook:Accordion("Seed Webhook", function(sec)
 
     sec:Label("Kirim data seed yang ada di tas setiap delay.", {size = 11, color = Color3.fromRGB(160, 160, 200)})
 
-    sec:NumberInput("Set Delay (menit)", SeedWebhookDelay, 1, 1, 60, function(v)
+    sec:NumberInput("Set Delay (m)", SeedWebhookDelay, 1, 1, 60, function(v)
         SeedWebhookDelay = v
         SaveSettings()
     end)
