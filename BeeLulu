@@ -1,0 +1,2013 @@
+-- ================================================================
+-- LuluXBee v0.1.1
+-- UI: LuluUI by Lulu_Attack
+-- ================================================================
+
+-- Services
+local Players           = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local HttpService       = game:GetService("HttpService")
+local VirtualUser       = game:GetService("VirtualUser")
+local player            = Players.LocalPlayer
+
+-- ================================================================
+-- CONSOLE LOG SYSTEM
+-- ================================================================
+local ConsoleEnabled = false
+local ShowInfo      = true
+
+local function Log(msg)
+    if ConsoleEnabled then print(msg) end
+end
+
+local function LogWarn(msg)
+    if ConsoleEnabled then warn(msg) end
+end
+
+-- ================================================================
+-- SHOP
+-- ================================================================
+local ShopFlower = {
+    {name = "Lavender",          price = 10},
+    {name = "Daisy",             price = 30},
+    {name = "Clover",            price = 150},
+    {name = "Sunflower",         price = 750},
+    {name = "Dahlia",            price = 1500},
+    {name = "Bamboo",            price = 5000},
+    {name = "Tulip",             price = 20000},
+    {name = "AloeFlower",        price = 50000},
+    {name = "VenusFlyTrap",      price = 70000},
+    {name = "MorningGlory",      price = 100000},
+    {name = "Gourd",             price = 120000},
+    {name = "FireBlossom",       price = 150000},
+    {name = "Bluebell",          price = 250000},
+    {name = "Lily",              price = 350000},
+    {name = "RedRose",           price = 500000},
+    {name = "Cactus",            price = 800000},
+    {name = "KniphofiaUvaria",   price = 1000000},
+    {name = "AquilegiaCoerulea", price = 2400000},
+    {name = "MartagonLily",      price = 3500000},
+}
+
+local ShopItems = {
+    {name = "BasicWaterCan",     price = 10000},
+    {name = "RareWaterCan",      price = 50000},
+    {name = "LuxuryWaterCan",    price = 100000},
+    {name = "BasicFertilizer",   price = 300000},
+    {name = "OrganicFertilizer", price = 50000000},
+    {name = "UltraFertilizer",   price = 100000000},
+    {name = "FairyElixirI",      price = 400000},
+    {name = "FairyElixirII",     price = 2000000},
+    {name = "FairyElixirIII",    price = 5000000},
+    {name = "FairyElixirIV",     price = 10000000},
+}
+
+
+-- ================================================================
+-- PLOT COORDINATES
+-- ================================================================
+local PlotCoordinates = {
+    {name = "Awal",    x = -234.14993286132813, y = 3.999999761581421,  z = -452.236572265625},
+    {name = "plot1.1", x = -274.7723693847656,  y = 4.499999523162842,  z = -463.15179443359377},
+    {name = "plot1.2", x = -274.2889404296875,  y = 4.499999523162842,  z = -489.54351806640627},
+    {name = "plot1.3", x = -244.24879455566407, y = 4.499999523162842,  z = -488.979248046875},
+    {name = "plot1.4", x = -244.14617919921876, y = 4.399999618530273,  z = -462.7499084472656},
+    {name = "plot2.1", x = -224.35093688964845, y = 4.5199995040893559, z = -489.9873962402344},
+    {name = "plot2.2", x = -193.6008758544922,  y = 4.399999618530273,  z = -489.3583984375},
+    {name = "plot2.3", x = -193.890625,         y = 4.499999523162842,  z = -463.09619140625},
+    {name = "plot2.4", x = -224.55416870117188, y = 4.4599995613098148, z = -463.1196594238281},
+    {name = "plot3.1", x = -244.49542236328126, y = 4.499999523162842,  z = -497.39111328125},
+    {name = "plot3.2", x = -274.7738037109375,  y = 4.559999942779541,  z = -497.8259582519531},
+    {name = "plot3.3", x = -274.9179992675781,  y = 4.4599995613098148, z = -524.3513793945313},
+    {name = "plot3.4", x = -243.79025268554688, y = 4.4599995613098148, z = -523.951171875},
+    {name = "plot4.1", x = -224.35813903808595, y = 4.499999523162842,  z = -497.24005126953127},
+    {name = "plot4.2", x = -194.17398071289063, y = 4.499999523162842,  z = -497.6167297363281},
+    {name = "plot4.3", x = -193.58145141601563, y = 4.559999942779541,  z = -524.036865234375},
+    {name = "plot4.4", x = -224.0901641845703,  y = 4.499999523162842,  z = -523.9185180664063},
+    {name = "plot5.1", x = -224.07667541503907, y = 4.499999523162842,  z = -531.6309204101563},
+    {name = "plot5.2", x = -193.83729553222657, y = 4.499999523162842,  z = -531.7321166992188},
+    {name = "plot5.3", x = -193.87232971191407, y = 4.559997081756592,  z = -557.8917236328125},
+    {name = "plot5.4", x = -224.19386291503907, y = 4.499999523162842,  z = -557.8511962890625},
+    {name = "plot6.1", x = -244.08892822265626, y = 4.499999523162842,  z = -557.65478515625},
+    {name = "plot6.2", x = -243.8088836669922,  y = 4.559995174407959,  z = -531.2903442382813},
+    {name = "plot6.3", x = -275.0115966796875,  y = 4.459994792938232,  z = -531.5806274414063},
+    {name = "plot6.4", x = -274.6578674316406,  y = 4.559995174407959,  z = -558.2437744140625},
+}
+
+-- ================================================================
+-- SEED MAPPING SYSTEM
+-- ================================================================
+local CONFIG_FILE = "seed_config.json" local DEFAULT_MAPPING = {
+    ["Four Leafe Clover"]  = "Clover",
+    ["Morning Glory"]      = "MorningGlory",
+    ["Fire Blossom"]       = "FireBlossom",
+    ["Venus Fly Trap"]     = "VenusFlyTrap",
+    ["Kniphofia Uvaria"]   = "KniphofiaUvaria",
+    ["Aquilegia Coerulea"] = "AquilegiaCoerulea",
+    ["Red Rose"]           = "RedRose",
+    ["Blue Bell"]          = "Bluebell",
+    ["Sun Flower"]         = "Sunflower",
+}
+
+local SeedNameMapping = {}
+
+local function HasFileAccess()
+    return type(readfile) == "function" and type(writefile) == "function"
+end
+
+local function WriteJsonConfig(mapping)
+    if not HasFileAccess() then print("Executor tidak support readfile/writefile") return false end
+    local ok, err = pcall(function()
+        local entries = {}
+        for k, v in pairs(mapping) do table.insert(entries, '    "' .. k .. '": "' .. v .. '"') end
+        table.sort(entries)
+        local pretty = "{\n" .. table.concat(entries, ",\n") .. "\n}" writefile(CONFIG_FILE, pretty)
+    end)
+    if ok then print("seed_config.json updated") return true
+    else print("Gagal tulis: " .. tostring(err)) return false end
+end
+
+local function ReadJsonConfig()
+    if not HasFileAccess() then
+        print("Pakai default mapping")
+        return nil
+    end
+    local exists = false
+    if type(isfile) == "function" then exists = isfile(CONFIG_FILE)
+    else local ok = pcall(function() readfile(CONFIG_FILE) end); exists = ok end
+    if not exists then
+        WriteJsonConfig(DEFAULT_MAPPING)
+        return DEFAULT_MAPPING
+    end
+    local ok, result = pcall(function() return HttpService:JSONDecode(readfile(CONFIG_FILE)) end)
+    if ok and result and type(result) == "table" then return result
+    else return DEFAULT_MAPPING end
+end
+
+local function LoadSeedConfig()
+    local mapping = ReadJsonConfig()
+    SeedNameMapping = {}
+    for k, v in pairs(mapping or DEFAULT_MAPPING) do SeedNameMapping[k] = v end
+end
+
+local function ReloadSeedConfig()
+    LoadSeedConfig()
+    local count = 0; for _ in pairs(SeedNameMapping) do count = count + 1 end
+    return count
+end
+
+local function PrintSeedMappings()
+    local sorted = {}
+    for k in pairs(SeedNameMapping) do table.insert(sorted, k) end
+    table.sort(sorted)
+    print("SEED MAPPINGS ")
+    for _, k in ipairs(sorted) do print('  "' .. k .. '" → "' .. SeedNameMapping[k] .. '"') end
+    print("Total: " .. #sorted)
+end
+
+local DiscoveredSeeds = {}
+
+local function ToCamelCase(displayName)
+    local result = "" for word in displayName:gmatch("%S+") do
+        result = result .. word:sub(1,1):upper() .. word:sub(2)
+    end
+    return result
+end
+
+local function GetPlantSeedName(displayName)
+    if SeedNameMapping[displayName] then return SeedNameMapping[displayName] end
+    if not DiscoveredSeeds[displayName] then
+        DiscoveredSeeds[displayName] = true
+        local camelCase = ToCamelCase(displayName)
+        SeedNameMapping[displayName] = camelCase
+        print("NEW SEED: " .. displayName .. " → " .. camelCase)
+        spawn(function() WriteJsonConfig(SeedNameMapping) end)
+    end
+    return SeedNameMapping[displayName]
+end
+
+LoadSeedConfig()
+
+-- ================================================================
+-- VARIABLES
+-- ================================================================
+local BuyAllFlower = true 
+local BuyAllItems = false
+local AutoClaimEnabled    = false
+local AutoSellEnabled     = false
+local AutoBuySeedEnabled  = false
+local AutoBuyItemsEnabled = false
+local AutoBuy
+local AutoSpawnBeeEnabled = false
+local AutoPlantEnabled    = false
+local IsAutoPlantRunning  = false
+
+local ClaimDelay       = 5
+local SellDelay        = 5
+local SpawnBeeDelay    = 10
+local BuyFlowerDelay    = 10
+local BuyItemsDelay = 10
+
+-- Shop: pilihan flower yang mau dibeli (diisi dari MultiDropdown)
+local SelectedBuyFlowers  = {}
+local selectedBuyItems = {}
+
+-- Auto Plant: pilihan flower yang mau di-plant (dari ShopFlower, bisa pilih walau seed belum ada)
+local SelectedPlantFlowers = {}
+
+local SelectedPlot     = 1
+local SelectedSeed     = nil
+local PlantAllSeeds    = true
+local PlantAllPlots    = false
+local PlantMode        = "follow_player"
+local MoveStud         = 2
+local StartDirection   = 4
+local PlantY           = 1.5089991092681885
+
+local PlantedPositions     = {}
+local PlantCollisionRadius = 1.5
+
+local AutoTradeEnabled       = false
+local TradeFlowerName        = nil
+local TradeTargetPlayer      = nil
+local TradeAmount            = 1
+local ScannedBackpackFlowers = {}
+local ScannedPlayerList      = {}
+
+local HideAllEnabled = false
+
+-- ================================================================
+-- WEBHOOK VARIABLES
+-- ================================================================
+local WebhookURL            = ""
+local WebhookSeedEnabled    = false
+local SelectedWebhookSeeds  = {}
+local WebhookSeedThread     = nil
+
+-- ================================================================
+-- QUEST VARIABLES
+-- ================================================================
+local ShowSeasonQuestEnabled  = false
+local TrackSpringQuestEnabled = false
+
+-- Quest season: slot dibangun dinamis saat data pertama tersedia
+local SPRING_FLOWERS   = {"RosettePinkFlower", "LanternFruit", "PurpleChrysanthemum"}
+
+-- ================================================================
+-- QUEST HELPER FUNCTIONS
+-- ================================================================
+
+-- Ambil semua task season quest yang punya Desc + Count
+-- Quest yang di-filter (tidak ditampilkan sama sekali)
+local QUEST_FILTER = {"Season Pass"}
+
+-- Prefix yang di-strip dari desc sebelum ditampilkan
+local QUEST_STRIP  = {"Daily Quest: ","Weekly Quest: ", "Monthly Quest: ", "Seasonal Quest: "}
+
+local function ProcessTaskDesc(rawDesc)
+    -- Filter: kalau desc diawali salah satu filter → buang
+    for _, f in ipairs(QUEST_FILTER) do
+        if rawDesc:sub(1, #f) == f then return nil end
+    end
+    -- Strip: hapus prefix kategori dari desc
+    for _, s in ipairs(QUEST_STRIP) do
+        if rawDesc:sub(1, #s) == s then
+            return rawDesc:sub(#s + 1)
+        end
+    end
+    return rawDesc
+end
+
+local function GetSeasonTasks()
+    local results = {}
+    local ok, sf = pcall(function()
+        return player.PlayerGui
+            :WaitForChild("ScreenSeasonPass", 2)
+            :FindFirstChild("ScreenSeasonPass")
+            :FindFirstChild("Task")
+            :FindFirstChild("ScrollingFrame")
+    end)
+    if not ok or not sf then return results end
+
+    for _, taskObj in ipairs(sf:GetChildren()) do
+        local desc  = taskObj:FindFirstChild("Desc")
+        local count = taskObj:FindFirstChild("Count")
+        if desc and count then
+            local processedDesc = ProcessTaskDesc(desc.Text)
+            if processedDesc == nil then continue end   -- filter out
+
+            -- Cek apakah done: format "X/Y", done kalau X >= Y
+            local cur, max = count.Text:match("(%d+)/(%d+)")
+            local isDone = false
+            if cur and max then
+                isDone = tonumber(cur) >= tonumber(max)
+            end
+            table.insert(results, {
+                desc   = processedDesc,
+                count  = count.Text,
+                isDone = isDone,
+            })
+        end
+    end
+
+    -- Sort: belum done dulu, done di bawah
+    table.sort(results, function(a, b)
+        if a.isDone ~= b.isDone then return not a.isDone end
+        return false
+    end)
+
+    return results
+end
+
+local function GetSpringData()
+    local result = {}
+    local player = game:GetService("Players").LocalPlayer
+
+    local activities = player:FindFirstChild("PlayerGui")
+        and player.PlayerGui:FindFirstChild("GameActivities")
+    if not activities then return result end
+
+    for _, panel in ipairs(activities:GetChildren()) do
+        local sf = panel:FindFirstChild("TasksFrame")
+            and panel.TasksFrame:FindFirstChild("Frame")
+            and panel.TasksFrame.Frame:FindFirstChild("ScrollingFrame")
+
+        if sf then
+            for _, ti in ipairs(sf:GetChildren()) do
+                if ti.Name == "TaskItem" then
+                    local flowersFrame = ti:FindFirstChild("Flowers")
+                    local progressFrame = ti:FindFirstChild("Progress")
+
+                    if flowersFrame and progressFrame then
+                        local progTexts = {}
+                        local hasValid = false
+
+                        for _, step in ipairs(progressFrame:GetChildren()) do
+                            local txt = step:FindFirstChild("TXT")
+                            local val = txt and txt.Text or ""
+
+                            if val ~= "" then
+                                hasValid = true
+                            end
+
+                            table.insert(progTexts, val)
+                        end
+
+                        if hasValid then
+                            local mainFlower = nil
+
+                            for _, name in ipairs(SPRING_FLOWERS) do
+                                if flowersFrame:FindFirstChild(name) then
+                                    mainFlower = name
+                                    break
+                                end
+                            end
+
+                            if mainFlower then
+                                result[mainFlower] = result[mainFlower] or {}
+
+                                -- gabung semua step ke 1 list
+                                for _, v in ipairs(progTexts) do
+                                    table.insert(result[mainFlower], v)
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    return result
+end
+
+-- HELPER FUNCTIONS
+-- ================================================================
+local function GetCoordinateByName(name)
+    for _, coord in ipairs(PlotCoordinates) do
+        if coord.name == name then return coord end
+    end
+    return nil
+end
+
+local function GetPlotCorners(plotNumber)
+    return {
+        p1 = GetCoordinateByName("plot" .. plotNumber .. ".1"),
+        p2 = GetCoordinateByName("plot" .. plotNumber .. ".2"),
+        p3 = GetCoordinateByName("plot" .. plotNumber .. ".3"),
+        p4 = GetCoordinateByName("plot" .. plotNumber .. ".4"),
+    }
+end
+
+local function TeleportPlayer(x, y, z)
+    if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+        player.Character.HumanoidRootPart.CFrame = CFrame.new(x, y, z)
+        wait(0.1)
+    end
+end
+
+local function IsPositionAvailable(x, z)
+    for _, planted in ipairs(PlantedPositions) do
+        local dist = math.sqrt((x - planted.x)^2 + (z - planted.z)^2)
+        if dist < PlantCollisionRadius then return false end
+    end
+    return true
+end
+
+local function AddPlantedPosition(x, z) table.insert(PlantedPositions, {x=x, z=z}) end
+local function ClearPlantedPositions() PlantedPositions = {} end
+
+-- ================================================================
+-- CORE FUNCTIONS
+-- ================================================================
+local function GetMyPlotModel()
+    local plotsFolder = workspace:FindFirstChild("Plots")
+    if not plotsFolder then LogWarn("workspace.Plots tidak ditemukan!") return nil end
+    for _, model in ipairs(plotsFolder:GetChildren()) do
+        if model:IsA("Model") and model:GetAttribute("IsNearby") == true then return model end
+    end
+    LogWarn("Plot milikmu tidak ditemukan!")
+    return nil
+end
+
+local function GetMyHives()
+    local myModel = GetMyPlotModel()
+    if not myModel then return {} end
+    local HivesFolder = myModel:FindFirstChild("Hives")
+    if not HivesFolder then return {} end
+    local MyHives = {}
+    for _, hive in ipairs(HivesFolder:GetChildren()) do
+        if tonumber(hive.Name) then table.insert(MyHives, hive) end
+    end
+    return MyHives
+end
+
+local function ClaimTreeHoney()
+    pcall(function()
+        ReplicatedStorage.Framework.Features.FlowerTreeSystem.FlowerTreeUtil.RemoteEvent:FireServer("GetTreeHoney","Tree1")
+    end)
+    Log("Claimed Tree Honey!")
+end
+
+local function ClaimAllHives()
+    local MyHives = GetMyHives()
+    if #MyHives == 0 then Log("Tidak ada hive") return end
+    ReplicatedStorage.Framework.Features.HoneySystem.HiveUtil.RemoteEvent:FireServer("ExtractHoney", MyHives)
+    Log("Claimed " .. #MyHives .. " hives!")
+    ClaimTreeHoney()
+end
+
+local function SellAllHoney()
+    ReplicatedStorage.Framework.Features.HoneySystem.HoneyUtil.RemoteEvent:FireServer("SellHoney")
+    Log("Sold all honey!")
+end
+--Buy Flower
+local function BuyFlower(flowerName)
+    ReplicatedStorage.Framework.Features.HoneySystem.FlowerUtil.RemoteEvent:FireServer("BuyFlower", flowerName)
+end
+
+local function GetFlowerStock(flowerName)
+    local success, stock = pcall(function()
+        local screen = player:WaitForChild("PlayerGui"):FindFirstChild("ScreenItemsShop")
+        if not screen then return 0 end
+        local shopWindow = screen:FindFirstChild("FlowerShopWindow")
+        if not shopWindow then return 0 end
+        local children = shopWindow:GetChildren()
+        if #children < 3 then return 0 end
+        local sf = children[3]:FindFirstChild("ScrollingFrame")
+        if not sf then return 0 end
+        local frame = sf:FindFirstChild(flowerName)
+        if not frame then return 0 end
+        local btn = frame:FindFirstChild("ItemButton")
+        if not btn then return 0 end
+        local lbl = btn:FindFirstChild("StockLabel")
+        if not lbl then return 0 end
+        return tonumber(lbl.Text:match("X(%d+)")) or 0
+    end)
+    return success and stock or 0
+end
+
+local function BuyAllStock(flowerName)
+    local totalBought = 0
+    local initialStock = GetFlowerStock(flowerName)
+    if initialStock <= 0 then return 0 end
+    while totalBought < initialStock do
+        if GetFlowerStock(flowerName) <= 0 then break end
+        BuyFlower(flowerName)
+        totalBought = totalBought + 1
+        wait(0.4)
+        if totalBought >= 100 then break end
+    end
+    if totalBought > 0 then Log("Bought " .. totalBought .. "x " .. flowerName) end
+    return totalBought
+end
+
+-- AutoBuySeeds sekarang pakai SelectedBuyFlowers (dari MultiDropdown)
+local function AutoBuySeeds(list)
+    if not list or #list == 0 then return false end
+
+    local bought = false
+
+    for _, flowerName in ipairs(list) do
+        if GetFlowerStock(flowerName) > 0 then
+            BuyAllStock(flowerName)
+            task.wait(0.5)
+            bought = true
+        end
+    end
+
+    return bought
+end
+
+-- buy items
+local function BuyItems(itemsName)
+    ReplicatedStorage.Framework.Features.FlowerTreeSystem.TreeToolUtil.RemoteEvent:FireServer("BuyTreeFertilizer", itemsName)
+end 
+
+local function GetItemsStock(itemsName)
+    local success, stock = pcall(function()
+        local screen = player:WaitForChild("PlayerGui"):FindFirstChild("ScreenItemsShop")
+        if not screen then return 0 end
+        local shopWindow = screen:FindFirstChild("TreeToolShop")
+        if not shopWindow then return 0 end
+        local sf = shopWindow:FindFirstChild("ScrollingFrame", true)
+        if not sf then return 0 end
+        local frame = sf:FindFirstChild(itemsName)
+        if not frame then return 0 end
+        local btn = frame:FindFirstChild("ItemButton")
+        if not btn then return 0 end
+        local lbl = btn:FindFirstChild("StockLabel")
+        if not lbl then return 0 end
+        local num = lbl.Text:match("%d+")
+        return tonumber(num) or 0
+    end)
+
+    return success and stock or 0
+end
+
+local function BuyAllStock(itemsName)
+    local totalBought = 0
+    local initialStock = GetItemsStock(itemsName)
+    if initialStock <= 0 then return 0 end
+    while totalBought < initialStock do
+        if GetItemsStock(itemsName) <= 0 then break end
+        BuyItems(itemsName)
+        totalBought = totalBought + 1
+        wait(0.4)
+        if totalBought >= 100 then break end
+    end
+    if totalBought > 0 then Log("Bought " .. totalBought .. "x " .. itemsName) end
+    return totalBought
+end
+
+-- AutoBuyItems sekarang pakai selectedBuyItems (dari MultiDropdown)
+local function AutoBuyItems(list)
+    if not list or #list == 0 then return false end
+
+    local bought = false
+
+    for _, itemsName in ipairs(list) do
+        if GetItemsStock(itemsName) > 0 then
+            BuyAllStock(itemsName)
+            task.wait(0.5)
+            bought = true
+        end
+    end
+
+    return bought
+end
+
+-- ================================================================
+-- WEBHOOK FUNCTIONS
+-- ================================================================
+local function SendDiscordWebhook(url, message)
+    if not url or url == "" then
+        Log("[Webhook] URL kosong!")
+        return false
+    end
+    local ok, err = pcall(function()
+        request({
+            Url    = url,
+            Method = "POST",
+            Headers = { ["Content-Type"] = "application/json" },
+            Body   = HttpService:JSONEncode({ content = message }),
+        })
+    end)
+    if ok then
+        Log("[Webhook] Sent OK")
+    else
+        LogWarn("[Webhook] Gagal: " .. tostring(err))
+    end
+    return ok
+end
+
+-- Loop: cek stock seed yang dipilih, beli, dan kirim notif ke Discord
+local function StartWebhookSeedLoop()
+    WebhookSeedThread = task.spawn(function()
+        while WebhookSeedEnabled do
+            if #SelectedWebhookSeeds > 0 then
+                local bought = {}
+                for _, flowerName in ipairs(SelectedWebhookSeeds) do
+                    local stock = GetFlowerStock(flowerName)
+                    if stock > 0 then
+                        local n = BuyAllStock(flowerName)
+                        if n > 0 then
+                            table.insert(bought, flowerName .. " x" .. n)
+                            task.wait(0.3)
+                        end
+                    end
+                end
+
+                if #bought > 0 then
+                    local msg = "[LuluXBee] Webhook Seed\nSeed dibeli:\n"
+                    for _, b in ipairs(bought) do
+                        msg = msg .. "  - " .. b .. "\n"
+                    end
+                    msg = msg .. "Time: " .. os.date("%Y-%m-%d %H:%M:%S")
+                    SendDiscordWebhook(WebhookURL, msg)
+                end
+
+                task.wait(10)
+            else
+                task.wait(5)
+            end
+        end
+        WebhookSeedThread = nil
+    end)
+end
+
+-- ================================================================
+-- SEED FUNCTIONS
+-- ================================================================
+local function GetSeedCount(seedType)
+    local backpack = player:WaitForChild("Backpack")
+    for _, item in ipairs(backpack:GetChildren()) do
+        local itemLower = item.Name:lower()
+        if itemLower:match(seedType:lower()) and itemLower:match("seed") then
+            return tonumber(item.Name:match("%[x(%d+)%]")) or 1
+        end
+    end
+    return 0
+end
+
+local function GetAllSeeds()
+    local backpack = player:WaitForChild("Backpack")
+    local seeds, seen = {}, {}
+    for _, item in ipairs(backpack:GetChildren()) do
+        if item.Name:match("Seed") then
+            local seedType = item.Name:match("(.-)%s+Seed")
+            if seedType and not seen[seedType] then
+                seen[seedType] = true
+                GetPlantSeedName(seedType)
+                table.insert(seeds, {
+                    Name  = seedType,
+                    Count = tonumber(item.Name:match("%[x(%d+)%]")) or 1
+                })
+            end
+        end
+    end
+    return seeds
+end
+
+-- ================================================================
+-- AUTO TRADE
+-- ================================================================
+local EXCLUDED_KEYWORDS = {"seed","fertilizer","deletetols","movetols","delete","move"}
+
+local function IsExcluded(itemName)
+    local lower = itemName:lower()
+    for _, kw in ipairs(EXCLUDED_KEYWORDS) do
+        if lower:find(kw) then return true end
+    end
+    return false
+end
+
+local function ScanBackpackFlowers()
+    ScannedBackpackFlowers = {}
+    local backpack = player:WaitForChild("Backpack")
+    for _, item in ipairs(backpack:GetChildren()) do
+        if not IsExcluded(item.Name) then
+            local uid = item:GetAttribute("UniqueId")
+            if uid then
+                local idNum = tonumber(uid)
+                if idNum then
+                    if not ScannedBackpackFlowers[item.Name] then
+                        ScannedBackpackFlowers[item.Name] = {}
+                    end
+                    table.insert(ScannedBackpackFlowers[item.Name], idNum)
+                end
+            end
+        end
+    end
+    local count = 0
+    for name, ids in pairs(ScannedBackpackFlowers) do
+        count = count + #ids
+        Log("Found: " .. name .. " x" .. #ids)
+    end
+    Log("Scan selesai: " .. count .. " items")
+    return ScannedBackpackFlowers
+end
+
+local function GetBackpackFlowerDropdownOptions()
+    local opts = {}
+    for name, ids in pairs(ScannedBackpackFlowers) do
+        table.insert(opts, name .. "X" .. #ids)
+    end
+    if #opts == 0 then table.insert(opts, "[Scan Backpack dulu]") end
+    return opts
+end
+
+local function ScanPlayers()
+    ScannedPlayerList = {}
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= player then table.insert(ScannedPlayerList, p.Name) end
+    end
+    Log("Scan players: " .. #ScannedPlayerList .. " player(s)")
+    return ScannedPlayerList
+end
+
+local function GetPlayerDropdownOptions()
+    local opts = {}
+    for _, name in ipairs(ScannedPlayerList) do table.insert(opts, name) end
+    if #opts == 0 then table.insert(opts, "[Scan Players dulu]") end
+    return opts
+end
+
+local function DoAutoTrade()
+    if not TradeFlowerName then Log("Pilih flower dulu!") return end
+    if not TradeTargetPlayer then Log("Pilih target player dulu!") return end
+    local ids = ScannedBackpackFlowers[TradeFlowerName]
+    if not ids or #ids == 0 then Log("Tidak ada ID — scan ulang!") return end
+    local toSend = math.min(TradeAmount, #ids)
+    Log("Trade START | " .. TradeFlowerName .. " x" .. toSend)
+    local sentCount, usedIds = 0, {}
+    for i = 1, toSend do
+        if not AutoTradeEnabled then Log("Trade dihentikan") break end
+        local idToSend = nil
+        for _, id in ipairs(ids) do
+            if not usedIds[id] then idToSend = id break end
+        end
+        if not idToSend then Log("Tidak cukup ID") break end
+        usedIds[idToSend] = true
+        pcall(function()
+            ReplicatedStorage.Framework.Features.GiftSystem.GiftUtil.RemoteEvent:FireServer(
+                "GiveGift", TradeTargetPlayer, "Flower", idToSend
+            )
+        end)
+        sentCount = sentCount + 1
+        if i < toSend and AutoTradeEnabled then wait(1) end
+    end
+    AutoTradeEnabled = false
+    Log("Trade selesai: " .. sentCount .. "/" .. toSend)
+end
+
+-- ================================================================
+-- PLANTING FUNCTIONS
+-- ================================================================
+local function PlantSeedAt(seedType, x, y, z, mode, plotNum)
+    if not IsPositionAvailable(x, z) then return false end
+    local plantSeedName = GetPlantSeedName(seedType)
+    Log("Tanam [".. plantSeedName .. "] Plot " .. (plotNum or "?"))
+    if mode == "follow_player" then
+        TeleportPlayer(x, y, z)
+        local playerPos = player.Character.HumanoidRootPart.Position
+        local args = {
+            "PlaceFlower", plantSeedName,
+            CFrame.new(playerPos.X, PlantY, playerPos.Z)
+                * CFrame.Angles(math.pi, (math.random()*2-1)*0.4, math.random()>0.5 and math.pi or -math.pi)
+        }
+        pcall(function()
+            ReplicatedStorage.Framework.Features.HoneySystem.FlowerUtil.RemoteFunction:InvokeServer(unpack(args))
+        end)
+        AddPlantedPosition(playerPos.X, playerPos.Z)
+    else
+        local args = {
+            "PlaceFlower", plantSeedName,
+            CFrame.new(x, PlantY, z)
+                * CFrame.Angles(math.pi, (math.random()*2-1)*0.4, math.random()>0.5 and math.pi or -math.pi)
+        }
+        pcall(function()
+            ReplicatedStorage.Framework.Features.HoneySystem.FlowerUtil.RemoteFunction:InvokeServer(unpack(args))
+        end)
+        AddPlantedPosition(x, z)
+    end
+    wait(0.8)
+    return true
+end
+
+local function LinearInterpolate(startPos, endPos, steps)
+    local positions = {}
+    for i = 0, steps do
+        local t = steps > 0 and (i / steps) or 0
+        table.insert(positions, {
+            x = startPos.x + (endPos.x - startPos.x) * t,
+            y = startPos.y + (endPos.y - startPos.y) * t,
+            z = startPos.z + (endPos.z - startPos.z) * t,
+        })
+    end
+    return positions
+end
+
+local function AutoPlantZigZag(seedName, plotNumber, mode)
+    local corners = GetPlotCorners(plotNumber)
+    if not corners.p1 then Log("Plot " .. plotNumber .. " tidak ditemukan") return 0 end
+    local startCorner = StartDirection == 3 and corners.p3 or corners.p4
+    local endCorner   = StartDirection == 3 and corners.p1 or corners.p2
+    local stepsAlong  = math.floor(math.abs(endCorner.z - startCorner.z) / MoveStud)
+    local stepsAcross = math.floor(math.abs(corners.p1.x - corners.p2.x) / MoveStud)
+    local totalPlanted = 0
+    for row = 0, stepsAcross do
+        if not AutoPlantEnabled then break end
+        if GetSeedCount(seedName) <= 0 then
+            Log("Seed " .. seedName .. " habis")
+            break
+        end
+        local t = stepsAcross > 0 and (row / stepsAcross) or 0
+        local rowStartX = startCorner.x + (endCorner.x - startCorner.x) * t
+        local rowEndX   = rowStartX
+        local rowStartZ = startCorner.z
+        local rowEndZ   = endCorner.z
+        local forward = row % 2 == 0
+        local positions = LinearInterpolate(
+            {x=rowStartX, y=startCorner.y, z = forward and rowStartZ or rowEndZ},
+            {x=rowEndX,   y=startCorner.y, z = forward and rowEndZ   or rowStartZ},
+            stepsAlong
+        )
+        for _, pos in ipairs(positions) do
+            if not AutoPlantEnabled then break end
+            if GetSeedCount(seedName) <= 0 then break end
+            if PlantSeedAt(seedName, pos.x, pos.y, pos.z, mode, plotNumber) then
+                totalPlanted = totalPlanted + 1
+            end
+        end
+    end
+    return totalPlanted
+end
+
+local function ContinuousAutoPlant()
+    IsAutoPlantRunning = true
+    while IsAutoPlantRunning do
+        local seeds = GetAllSeeds()
+        if #seeds == 0 then
+            Log("Tidak ada seed di backpack, menunggu...")
+            wait(5)
+        else
+            AutoPlantEnabled = true
+            ClearPlantedPositions()
+            local seedsToPlant = {}
+            if #SelectedPlantFlowers > 0 then
+                -- filter: hanya plant seed yang nama internal-nya ada di SelectedPlantFlowers
+                for _, s in ipairs(seeds) do
+                    local internalName = GetPlantSeedName(s.Name)
+                    for _, chosen in ipairs(SelectedPlantFlowers) do
+                        if internalName == chosen then
+                            table.insert(seedsToPlant, s.Name)
+                            break
+                        end
+                    end
+                end
+            elseif PlantAllSeeds then
+                for _, s in ipairs(seeds) do table.insert(seedsToPlant, s.Name) end
+            elseif SelectedSeed then
+                table.insert(seedsToPlant, SelectedSeed)
+            end
+            local plotsToPlant = {}
+            if PlantAllPlots then for i = 1, 6 do table.insert(plotsToPlant, i) end
+            elseif SelectedPlot then table.insert(plotsToPlant, SelectedPlot) end
+            for _, plotNum in ipairs(plotsToPlant) do
+                if not IsAutoPlantRunning then break end
+                for _, seedName in ipairs(seedsToPlant) do
+                    if not IsAutoPlantRunning then break end
+                    if GetSeedCount(seedName) > 0 then
+                        AutoPlantZigZag(seedName, plotNum, PlantMode)
+                        wait(1)
+                    end
+                end
+            end
+            AutoPlantEnabled = false
+            wait(2)
+        end
+    end
+    IsAutoPlantRunning = false
+end
+
+-- ================================================================
+-- ANTI-AFK
+-- ================================================================
+spawn(function()
+    while true do
+        wait(60)
+        VirtualUser:Button2Down(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
+        wait(1)
+        VirtualUser:Button2Up(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
+    end
+end)
+
+-- ================================================================
+-- LOAD LULU UI
+-- ================================================================
+task.wait(1)
+local LuluUI = loadstring(game:HttpGet(
+    "https://raw.githubusercontent.com/ytlulu/LULUVUI/main/BETATEST2",
+    true
+))()
+
+LuluUI.SetTheme("Purple")
+
+local win = LuluUI.new({
+    title  = "LuluXBee",
+    subtitle ="v0.1.1",
+    name   = "LuluXBeeGui",
+    width  = 340,
+    height = 300,
+})
+
+-- ================================================================
+-- PANEL INFO & FLOWER LIST
+-- ================================================================
+local info      = win:InfoPanel()
+local lbl_still = info:Line("Still Grow : 0")
+local lbl_ready = info:Line("Ready Spawn: 0")
+local lbl_stock = info:Line("Stock      : ---")
+
+-- ── Season Quest Group ─────────────────────────────────────
+-- Default hidden, expand otomatis saat ShowSeasonQuestEnabled = true
+local grp_season       = info:Group()
+local pnl_seasonHeader = grp_season:Header("Season Quest")
+local pnl_seasonSlots  = {}   -- diisi dinamis saat data tersedia
+grp_season:Hide()  -- panel info mengecil saat quest off
+
+-- ── Spring Quest Group ─────────────────────────────────────
+-- Default hidden, dibangun dinamis saat data tersedia (seperti Season Quest)
+local grp_spring        = info:Group()
+grp_spring:Header("Spring Quest")
+local pnl_springDynamic = {}   -- diisi dinamis { flowerName = {lineRefs} }
+grp_spring:Hide()
+
+-- ============================
+-- List bunga
+-- ============================
+local StillGrowing  = {}  -- bunga yang sedang grow
+local ReadyToSpawn  = {}  -- bunga siap spawn
+
+-- ============================
+-- Fungsi scan awal dan update bunga
+-- ============================
+local function ScanFlowers()
+    local myModel = GetMyPlotModel()
+    if not myModel then return end
+
+    local flowersFolder = myModel:FindFirstChild("Flowers")
+    if not flowersFolder then return end
+
+    -- Scan semua bunga di folder
+    for _, flower in ipairs(flowersFolder:GetChildren()) do
+        if not flower or not flower.Parent then continue end  -- safety check
+
+        local hitbox = flower:FindFirstChild("Hitbox") or (flower.Name == "Hitbox" and flower)
+        if not hitbox then continue end
+
+        local growAttach  = hitbox:FindFirstChild("InstantGrowAttachment")
+        local spawnAttach = hitbox:FindFirstChild("SpawnBeeAttachment")
+
+        -- Jika sudah ada di ReadyToSpawn atau StillGrowing, skip
+        if table.find(ReadyToSpawn, flower) or table.find(StillGrowing, flower) then
+            continue
+        end
+
+        -- Masukin ke list sesuai status
+        if spawnAttach and spawnAttach:FindFirstChild("InstantGrowPrompt") then
+            table.insert(ReadyToSpawn, flower)
+        elseif growAttach and growAttach:FindFirstChild("InstantGrowPrompt") then
+            table.insert(StillGrowing, flower)
+        end
+    end
+
+    -- Update list StillGrowing -> ReadyToSpawn
+    for i = #StillGrowing, 1, -1 do
+        local f = StillGrowing[i]
+        if not f or not f.Parent then
+            table.remove(StillGrowing, i)
+            continue
+        end
+        local hb = f:FindFirstChild("Hitbox") or (f.Name == "Hitbox" and f)
+        if hb and hb:FindFirstChild("SpawnBeeAttachment") and hb.SpawnBeeAttachment:FindFirstChild("InstantGrowPrompt") then
+            table.remove(StillGrowing, i)
+            table.insert(ReadyToSpawn, f)
+        end
+    end
+end
+
+-- ============================
+-- Loop update panel setiap 1 detik
+-- ============================
+spawn(function()
+    while true do
+        task.wait(1)
+        ScanFlowers()
+
+        -- update panel
+        lbl_still.Text = "Still Grow : " .. #StillGrowing
+        lbl_ready.Text = "Ready Spawn: " .. #ReadyToSpawn
+
+        local stockLabel = "N/A"
+        local shopGui = game:GetService("Players").LocalPlayer.PlayerGui:FindFirstChild("ScreenItemsShop")
+        if shopGui then
+            local frame = shopGui:FindFirstChild("FlowerShopWindow") and shopGui.FlowerShopWindow:FindFirstChild("Frame")
+            if frame and frame:FindFirstChild("TimerLabel") then
+                stockLabel = frame.TimerLabel.Text
+            end
+        end
+        lbl_stock.Text = "Stock      : " .. stockLabel
+    end
+end)
+-- ================================================================
+-- AUTO SPAWN BEES
+-- ================================================================
+local function AutoSpawnAllBees()
+    local count = 0
+
+    if not ReadyToSpawn then return 0 end
+
+    for i = #ReadyToSpawn, 1, -1 do
+        local flower = ReadyToSpawn[i]
+        if not flower then
+            table.remove(ReadyToSpawn, i)
+            continue
+        end
+
+        local hitbox = flower.Name == "Hitbox" and flower or flower:FindFirstChild("Hitbox")
+        if not hitbox then continue end
+
+        local hasBee = hitbox:GetAttribute("BeeId")
+        local uid    = hitbox:GetAttribute("UniqueId")
+        if not hasBee and uid then
+            pcall(function()
+                ReplicatedStorage.Framework.Features.HoneySystem.FlowerUtil.RemoteEvent:FireServer(
+                    "SpawnFlowerBee", uid
+                )
+            end)
+            table.remove(ReadyToSpawn, i)
+            count = count + 1
+        else
+            table.remove(ReadyToSpawn, i)
+        end
+    end
+
+    return count
+end
+
+-- ================================================================
+-- TAB: INFO
+-- ================================================================
+local tabInfo = win:Tab("Info")
+
+tabInfo:Accordion("Script Info", function(sec)
+    sec:Label("LuluXBee",             {size = 14, bold = true})
+    sec:Label("Version: v0.1.1",      {size = 10, color = Color3.fromRGB(40, 160, 60)})
+    sec:Badge("BETA",                 {color = Color3.fromRGB(40, 120, 255)})
+    sec:Label("Bee Game Auto Script", {size = 10, color = Color3.fromRGB(150, 150, 180)})
+    sec:Label("by Lulu_Attack",       {size = 10, color = Color3.fromRGB(150, 150, 180)})
+end)
+
+tabInfo:Accordion("Discord", function(sec)
+    sec:Label("Credit: Lulu_Attack", {size = 10, color = Color3.fromRGB(150, 150, 180)})
+    sec:Button("Join Discord", function()
+        pcall(function() setclipboard("https://discord.gg/ytluluv1") end)
+        win:luluNotify("Link disalin!", Color3.fromRGB(88, 101, 242))
+    end, {color = Color3.fromRGB(88, 101, 242)})
+end)
+
+-- ================================================================
+-- TAB: HOME
+-- ================================================================
+local tabHome = win:Tab("Main")
+
+-- Smart Loop variables
+local SmartLoopDelay = 10
+local AutoSmartLoop  = false
+
+tabHome:Accordion("Honey System", function(sec)
+
+    sec:Accordion("Claim", function(s)
+        s:NumberInput("Delay (s)", ClaimDelay, 1, 1, 300, function(v)
+            ClaimDelay = v
+        end)
+
+        s:Toggle("Auto Claim", false, function(v)
+            AutoClaimEnabled = v
+            if v then
+                spawn(function()
+                    while AutoClaimEnabled do
+                        ClaimAllHives()
+                        wait(ClaimDelay)
+                    end
+                end)
+            end
+        end)
+        
+        s:Button("Claim Now", function(done)
+            ClaimAllHives()
+            win:luluNotify("Claimed!", Color3.fromRGB(40, 180, 80))
+            done()
+        end, {color = Color3.fromRGB(40, 160, 60), loading = "Claiming..."})
+    end)
+
+    sec:Accordion("Sell", function(s)
+        s:NumberInput("Delay (s)", SellDelay, 1, 1, 300, function(v)
+            SellDelay = v
+        end)
+
+        s:Toggle("Auto Sell", false, function(v)
+            AutoSellEnabled = v
+            if v then
+                spawn(function()
+                    while AutoSellEnabled do
+                        SellAllHoney()
+                        wait(SellDelay)
+                    end
+                end)
+            end
+        end)
+        s:Button("Sell Now", function(done)
+            SellAllHoney()
+            win:luluNotify("Sold!", Color3.fromRGB(40, 180, 80))
+            done()
+        end, {color = Color3.fromRGB(40, 160, 60), loading = "Selling..."})
+    end)
+
+    sec:Accordion("Smart Loop", function(s)
+        s:NumberInput("Loop Delay (s)", SmartLoopDelay, 1, 5, 300, function(v)
+            SmartLoopDelay = v
+        end)
+
+        s:Toggle("Auto Claim + Sell", false, function(v)
+            AutoSmartLoop = v
+            if v then
+                win:luluNotify("Smart Loop aktif!", Color3.fromRGB(40, 180, 80))
+                spawn(function()
+                    while AutoSmartLoop do
+                        ClaimAllHives()
+                        wait(2)
+                        SellAllHoney()
+                        wait(SmartLoopDelay)
+                    end
+                end)
+            else
+                win:luluNotify("Smart Loop dihentikan", Color3.fromRGB(220, 50, 50))
+            end
+        end)
+    end)
+
+end)
+
+tabHome:Accordion("Bee System", function(sec)
+    sec:Toggle("Auto Spawn", false, function(v)
+    AutoSpawnBeeEnabled = v
+    if v then
+        spawn(function()
+            while AutoSpawnBeeEnabled do
+                if #ReadyToSpawn > 0 then
+                    AutoSpawnAllBees()
+                end
+                task.wait(1)
+            end
+        end)
+    end
+end)
+
+    sec:Button("Spawn Now", function(done)
+        local n = AutoSpawnAllBees()
+        win:luluNotify(n .. " bees spawned!", Color3.fromRGB(40, 160, 60))
+        done()
+    end, {color = Color3.fromRGB(40, 160, 60), loading = "Spawning..."})
+end)
+
+tabHome:Accordion("Buy system", function(sec)
+
+    sec:Accordion("Buy Flower", function(s)
+    local FlowerBuyOpts = {}
+    local FlowerLabelToName = {}
+
+    -- default state (anti reset bug)
+    SelectedBuyFlowers = SelectedBuyFlowers or {}
+    BuyAllFlower      = BuyAllFlower or false
+    BuyFlowerDelay      = BuyFlowerDelay or 5
+    AutoBuySeedEnabled = AutoBuySeedEnabled or false
+
+    -- build dropdown
+    for _, item in ipairs(ShopFlower) do
+        local label = item.name .. " ($" .. item.price .. ")"
+        table.insert(FlowerBuyOpts, label)
+        FlowerLabelToName[label] = item.name
+    end
+
+    local function getTargetList()
+        local list = {}
+
+        if BuyAllFlower then
+            for _, item in ipairs(ShopFlower) do
+                table.insert(list, item.name)
+            end
+        else
+            for _, v in ipairs(SelectedBuyFlowers) do
+                table.insert(list, v)
+            end
+        end
+
+        return list
+    end
+
+    -- dropdown
+    s:MultiDropdown("Flower", FlowerBuyOpts, {}, function(selected)
+        SelectedBuyFlowers = {}
+        for _, label in ipairs(selected) do
+            local name = FlowerLabelToName[label]
+            if name then
+                table.insert(SelectedBuyFlowers, name)
+            end
+        end
+    end)
+
+
+s:Toggle("Buy All", BuyAllFlower, function(v)
+    BuyAllFlower = v
+
+    local status = v and "Enabled" or "Disabled"
+    local color  = v and Color3.fromRGB(40,120,255) or Color3.fromRGB(220,50,50)
+    win:luluNotify("Buy All " .. status, color)
+
+    if BuyAllFlower then
+        -- Override dropdown: pilih semua
+        SelectedItems = {} 
+        for _, item in ipairs(ShopFlower) do
+            table.insert(SelectedItems, item.name)
+        end
+    end
+end)
+
+    -- manual buy
+    s:Button("Buy One Click", function(done)
+        local list = getTargetList()
+
+        if #list == 0 then
+            win:luluNotify("No flower selected!", Color3.fromRGB(220,50,50))
+            return done()
+        end
+
+        local success = AutoBuySeeds(list)
+
+        if success then
+            win:luluNotify("Purchase Success!", Color3.fromRGB(40,180,80))
+        else
+            win:luluNotify("Nothing to buy / No Money", Color3.fromRGB(200,140,20))
+        end
+
+        done()
+    end, {loading = "Buying..."})
+
+    local autoBuyThread
+
+    s:Toggle("Enable Auto Buy", AutoBuySeedEnabled, function(v)
+        AutoBuySeedEnabled = v
+
+        if v then
+            if autoBuyThread then return end
+
+            win:luluNotify("Auto Buy started (" .. BuyFlowerDelay .. "s)", Color3.fromRGB(40,120,255))
+
+            autoBuyThread = task.spawn(function()
+                while AutoBuySeedEnabled do
+                    local list = getTargetList()
+
+                    if #list > 0 then
+                        AutoBuySeeds(list)
+                    end
+
+                    task.wait(BuyFlowerDelay)
+                end
+
+                autoBuyThread = nil
+            end)
+
+        else
+            win:luluNotify("Auto Buy stopped", Color3.fromRGB(220,50,50))
+        end
+    end)
+end)
+
+--- Buy Items Here
+    sec:Accordion("Buy Items", function(s)
+        local ItemsBuyOpts = {}
+        local ItemsLabelToName = {}
+    
+        -- default state (anti reset bug)
+        selectedBuyItems = selectedBuyItems or {}
+        BuyAllItems      = BuyAllItems or false
+        BuyItemsDelay      = BuyItemsDelay or 5
+        AutoBuyItemsEnabled = AutoBuyItemsEnabled or false
+    
+        -- build dropdown
+        for _, item in ipairs(ShopItems) do
+            local label = item.name .. " ($" .. item.price .. ")"
+            table.insert(ItemsBuyOpts, label)
+            ItemsLabelToName[label] = item.name
+        end
+    
+        local function getTargetList()
+            local list = {}
+    
+            if BuyAllItems then
+                for _, item in ipairs(ShopItems) do
+                    table.insert(list, item.name)
+                end
+            else
+                for _, v in ipairs(selectedBuyItems) do
+                    table.insert(list, v)
+                end
+            end
+    
+            return list
+        end
+    
+        -- dropdown
+        s:MultiDropdown("Items", ItemsBuyOpts, {}, function(selected)
+            selectedBuyItems = {}
+            for _, label in ipairs(selected) do
+                local name = ItemsLabelToName[label]
+                if name then
+                    table.insert(selectedBuyItems, name)
+                end
+            end
+        end)
+    
+    
+    s:Toggle("Buy All", BuyAllItems, function(v)
+        BuyAllItems = v
+    
+        local status = v and "Enabled" or "Disabled"
+        local color  = v and Color3.fromRGB(40,120,255) or Color3.fromRGB(220,50,50)
+        win:luluNotify("Buy All " .. status, color)
+    
+        if BuyAllItems then
+            -- Override dropdown: pilih semua
+            SelectedItems = {} 
+            for _, item in ipairs(ShopItems) do
+                table.insert(SelectedItems, item.name)
+            end
+        end
+    end)
+    
+        -- manual buy
+        s:Button("Buy One Click", function(done)
+            local list = getTargetList()
+    
+            if #list == 0 then
+                win:luluNotify("No Items selected!", Color3.fromRGB(220,50,50))
+                return done()
+            end
+    
+            local success = AutoBuyItems(list)
+    
+            if success then
+                win:luluNotify("Purchase Success!", Color3.fromRGB(40,180,80))
+            else
+                win:luluNotify("Nothing to buy / No Money", Color3.fromRGB(200,140,20))
+            end
+    
+            done()
+        end, {loading = "Buying..."})
+    
+        local autoBuyThread
+    
+        s:Toggle("Enable Auto Buy", AutoBuyItemsEnabled, function(v)
+            AutoBuyItemsEnabled = v
+    
+            if v then
+                if autoBuyThread then return end
+    
+                win:luluNotify("Auto Buy started (" .. BuyItemsDelay .. "s)", Color3.fromRGB(40,120,255))
+    
+                autoBuyThread = task.spawn(function()
+                    while AutoBuyItemsEnabled do
+                        local list = getTargetList()
+    
+                        if #list > 0 then
+                            AutoBuyItems(list)
+                        end
+    
+                        task.wait(BuyItemsDelay)
+                    end
+    
+                    autoBuyThread = nil
+                end)
+    
+            else
+                win:luluNotify("Auto Buy stopped", Color3.fromRGB(220,50,50))
+            end
+        end)
+    end)
+    
+end)
+
+tabHome:Accordion("Trade System", function(s)
+        local flowerDrop = s:Dropdown("Flower", {"[Scan dulu]"}, "[Scan dulu]", function(value)
+            if value:find("%[") then TradeFlowerName = nil return end
+            TradeFlowerName = value:match("(.-)%s+X%d+") or value
+            Log("Trade flower: " .. (TradeFlowerName or "nil"))
+        end)
+
+        local playerDrop = s:Dropdown("Player", {"[Scan dulu]"}, "[Scan dulu]", function(value)
+            if value:find("%[") then TradeTargetPlayer = nil return end
+            TradeTargetPlayer = Players:FindFirstChild(value)
+            Log("Trade target: " .. (value or "nil"))
+        end)
+
+                -- Scan Flower Button
+        s:Button("Scan Flower", function(done)
+            ScanBackpackFlowers()
+        
+            local opts = GetBackpackFlowerDropdownOptions()
+            flowerDrop:SetOptions(opts)
+        
+            local count = 0
+            for _, ids in pairs(ScannedBackpackFlowers) do
+                count = count + #ids
+            end
+        
+            win:luluNotify(count .. " flower item(s) ditemukan", Color3.fromRGB(40, 120, 255))
+            done()
+        end, {color = Color3.fromRGB(40, 120, 255), loading = "Scanning Flower..."})
+        
+        -- Scan Player Button
+        s:Button("Scan Player", function(done)
+            ScanPlayers()
+        
+            playerDrop:SetOptions(GetPlayerDropdownOptions())
+        
+            win:luluNotify(#ScannedPlayerList .. " player(s) ditemukan", Color3.fromRGB(40, 120, 255))
+            done()
+        end, {color = Color3.fromRGB(40, 120, 255), loading = "Scanning Player..." })
+
+        s:NumberInput("Amount", TradeAmount, 1, 1, 100, function(v)
+            TradeAmount = v
+        end)
+
+        s:Toggle("Enable", false, function(v)
+            AutoTradeEnabled = v
+            if v then
+                if not TradeFlowerName then
+                    win:luluNotify("Pilih flower dulu!", Color3.fromRGB(220, 50, 50))
+                    AutoTradeEnabled = false
+                    return
+                end
+                if not TradeTargetPlayer then
+                    win:luluNotify("Pilih player dulu!", Color3.fromRGB(220, 50, 50))
+                    AutoTradeEnabled = false
+                    return
+                end
+                win:luluNotify("Trade dimulai!", Color3.fromRGB(40, 180, 80))
+                spawn(function()
+                    DoAutoTrade()
+                    AutoTradeEnabled = false
+                    win:luluNotify("Trade selesai!", Color3.fromRGB(40, 180, 80))
+                end)
+            else
+                AutoTradeEnabled = false
+                Log("Trade force stopped")
+            end
+        end)
+    end)
+
+-- ================================================================
+-- TAB: AUTO PLANT
+-- ================================================================
+local tabPlant = win:Tab("Auto Plant")
+
+tabPlant:Accordion("Set up System", function(sec)
+
+    sec:Accordion("Seed", function(s)
+        local seedDrop = s:Dropdown("Pilih Seed", {"[All Seeds]"}, "[All Seeds]", function(value)
+            if value == "[All Seeds]" then
+                PlantAllSeeds = true; SelectedSeed = nil
+            elseif not value:match("%[No seeds") then
+                PlantAllSeeds = false
+                SelectedSeed = value:match("(.-)%s+%[x") or value
+            end
+        end)
+
+        -- Refresh Button
+        s:Button("Refresh", function(done)
+            local seeds = GetAllSeeds()
+                local newOpts = {"[All Seeds]"}
+
+            for _, sd in ipairs(seeds) do
+                table.insert(newOpts, sd.Name .. " [x" .. sd.Count .. "]")
+        end
+
+        seedDrop:SetOptions(newOpts)
+        SelectedSeed = nil
+        PlantAllSeeds = true
+
+                win:luluNotify(#seeds .. " seed(s) ditemukan", Color3.fromRGB(40, 120, 255))
+            done()
+        end, {color = Color3.fromRGB(40, 120, 255), loading = "Refreshing..."})
+
+-- Clear Cache Button
+        s:Button("Clear Cache", function(done)
+            local count = #PlantedPositions
+            ClearPlantedPositions()
+
+                win:luluNotify(count .. " positions cleared", Color3.fromRGB(100, 110, 140))
+            done()
+        end, {color = Color3.fromRGB(100, 110, 140), loading = "Clearing..."})
+
+        -- Chose: pilih flower dari ShopFlower yang mau di-plant
+        -- Bisa dipilih walau seed belum ada di backpack
+        local PlantFlowerOpts = {}
+        for _, item in ipairs(ShopFlower) do
+            table.insert(PlantFlowerOpts, item.name)
+        end
+
+        s:MultiDropdown("Chose", PlantFlowerOpts, {}, function(selected)
+            SelectedPlantFlowers = {}
+            for _, name in ipairs(selected) do
+                table.insert(SelectedPlantFlowers, name)
+            end
+        end)
+    end)
+
+    sec:Dropdown("Plot",
+        {"[All Plots]","Plot 1","Plot 2","Plot 3","Plot 4","Plot 5","Plot 6"},
+        "[All Plots]",
+        function(value)
+            if value == "[All Plots]" then
+                PlantAllPlots = true; SelectedPlot = nil
+            else
+                PlantAllPlots = false
+                SelectedPlot = tonumber(value:match("%d+"))
+            end
+        end
+    )
+
+end)
+
+tabPlant:Accordion("Plant System", function(sec)
+
+    sec:Segment("Mode", {"Follow Player", "Coordinate"}, "Follow Player", function(v)
+        PlantMode = v == "Follow Player" and "follow_player" or "follow_coordinate"
+    end)
+
+    sec:Accordion("Advanced Config", function(s)
+        s:NumberInput("Distance (studs)", MoveStud, 0.5, 1, 10, function(v)
+            MoveStud = v
+        end)
+        s:Dropdown("Direction", {"Start from .3","Start from .4"}, "Start from .4", function(value)
+            StartDirection = tonumber(value:match("%.(%d)")) or 4
+        end)
+        s:NumberInput("Collision Radius (studs)", PlantCollisionRadius, 0.5, 0.5, 5, function(v)
+            PlantCollisionRadius = v
+        end)
+        s:NumberInput("Plant Y", PlantY, 0.1, -5, 10, function(v)
+            PlantY = v
+        end)
+    end)
+
+end)
+
+tabPlant:Accordion("Control plant", function(sec)
+    sec:Toggle("Loop Plant", false, function(v)
+        if v then
+            if IsAutoPlantRunning then
+                win:luluNotify("Loop sudah jalan!", Color3.fromRGB(220, 140, 20))
+                return
+            end
+            ClearPlantedPositions()
+            spawn(function() ContinuousAutoPlant() end)
+            win:luluNotify("Continuous Plant dimulai!", Color3.fromRGB(40, 180, 80))
+        else
+            IsAutoPlantRunning = false
+            AutoPlantEnabled   = false
+            win:luluNotify("Stopping...", Color3.fromRGB(220, 140, 20))
+        end
+    end)
+    
+    sec:Button("Start Once", function(done)
+        if not PlantAllSeeds and not SelectedSeed then
+            win:luluNotify("Pilih seed dulu!", Color3.fromRGB(220, 50, 50))
+            done()
+            return
+        end
+        ClearPlantedPositions()
+        AutoPlantEnabled = true
+        local seedsToPlant = {}
+        local allSeeds = GetAllSeeds()
+        if #SelectedPlantFlowers > 0 then
+            -- filter: hanya plant seed yang nama internal-nya ada di SelectedPlantFlowers
+            for _, s in ipairs(allSeeds) do
+                local internalName = GetPlantSeedName(s.Name)
+                for _, chosen in ipairs(SelectedPlantFlowers) do
+                    if internalName == chosen then
+                        table.insert(seedsToPlant, s.Name)
+                        break
+                    end
+                end
+            end
+        elseif PlantAllSeeds then
+            for _, s in ipairs(allSeeds) do table.insert(seedsToPlant, s.Name) end
+        else
+            table.insert(seedsToPlant, SelectedSeed)
+        end
+        local plotsToPlant = {}
+        if PlantAllPlots then
+            for i = 1, 6 do table.insert(plotsToPlant, i) end
+        else
+            table.insert(plotsToPlant, SelectedPlot)
+        end
+        win:luluNotify("Auto Plant dimulai!", Color3.fromRGB(40, 180, 80))
+        spawn(function()
+            local total = 0
+            for _, plotNum in ipairs(plotsToPlant) do
+                if not AutoPlantEnabled then break end
+                for _, seedName in ipairs(seedsToPlant) do
+                    if not AutoPlantEnabled then break end
+                    if GetSeedCount(seedName) > 0 then
+                        total = total + AutoPlantZigZag(seedName, plotNum, PlantMode)
+                        wait(1)
+                    end
+                end
+            end
+            AutoPlantEnabled = false
+            win:luluNotify(total .. " seeds planted!", Color3.fromRGB(40, 180, 80))
+            done()
+        end)
+    end, {color = Color3.fromRGB(40, 160, 60), loading = "Planting..."})
+
+    sec:Button("Stop", function()
+        AutoPlantEnabled   = false
+        IsAutoPlantRunning = false
+        win:luluNotify("Auto Plant dihentikan!", Color3.fromRGB(220, 50, 50))
+    end, {color = Color3.fromRGB(200, 50, 50)})
+
+end)
+
+-- ================================================================
+-- TAB: QUEST
+-- ================================================================
+local tabQuest = win:Tab("Quest")
+
+-- variabel state (jumlah task terakhir untuk deteksi rebuild panel)
+local lastSeasonCount = -1
+local lastSpringTotal = -1
+
+tabQuest:Accordion("Season Quest", function(sec)
+    sec:Toggle("Show Quest", false, function(v)
+        ShowSeasonQuestEnabled = v
+        grp_season:SetVisible(v)
+    end)
+end)
+
+tabQuest:Accordion("Spring Quest", function(sec)
+    sec:Toggle("Track Quest", false, function(v)
+        TrackSpringQuestEnabled = v
+        grp_spring:SetVisible(v)
+        win:luluNotify(
+            v and "Spring Quest tracking ON" or "Spring Quest tracking OFF",
+            v and Color3.fromRGB(40, 180, 80) or Color3.fromRGB(150, 150, 180)
+        )
+    end)
+end)
+tabQuest:Accordion("Debug",function(sec)
+    sec:Button("Debug Path", function()
+        local activities = player.PlayerGui:FindFirstChild("GameActivities")
+        if not activities then
+            win:luluNotify("GameActivities tidak ada!", Color3.fromRGB(220, 50, 50))
+            return
+        end
+        local names = {}
+        for _, c in ipairs(activities:GetChildren()) do table.insert(names, c.Name) end
+        print("[SpringQuest] GameActivities children: " .. table.concat(names, ", "))
+        win:luluNotify("Cek console!", Color3.fromRGB(40, 120, 255))
+    end, {color = Color3.fromRGB(100, 110, 140)}, { locked = true })
+end, {locked = true})
+
+-- ────────────────────────────────────────────────────────────────
+-- Quest Update Loop — hanya update panel info, tidak sentuh tab UI
+-- ────────────────────────────────────────────────────────────────
+spawn(function()
+    while true do
+        task.wait(1)
+
+        -- ── Season Quest ─────────────────────────────────────
+        if ShowSeasonQuestEnabled then
+            local tasks = GetSeasonTasks()
+
+            if #tasks ~= lastSeasonCount then
+                -- rebuild panel info
+                grp_season:Clear()
+                pnl_seasonSlots = {}
+                grp_season:Header("Season Quest")
+                for _, t in ipairs(tasks) do
+                    local countTxt = t.isDone and "done" or t.count
+                    local sv = grp_season:QuestLine(t.desc, countTxt)
+                    table.insert(pnl_seasonSlots, sv)
+                end
+                lastSeasonCount = #tasks
+            else
+                -- update teks panel info saja
+                for i, t in ipairs(tasks) do
+                    local countTxt = t.isDone and "done" or t.count
+                    local col = t.isDone
+                        and Color3.fromRGB(40, 210, 90)
+                        or  Color3.fromRGB(80, 160, 255)
+                    if pnl_seasonSlots[i] then
+                        pnl_seasonSlots[i](countTxt, col)
+                    end
+                end
+            end
+        end
+
+        -- ── Spring Quest ─────────────────────────────────────
+        if TrackSpringQuestEnabled then
+            local springData = GetSpringData()
+            local newFlowers = {}
+            for fn in pairs(springData) do table.insert(newFlowers, fn) end
+            table.sort(newFlowers)
+
+            local totalNeeded = 0
+            for _, fn in ipairs(newFlowers) do
+                totalNeeded = totalNeeded + #(springData[fn])
+            end
+
+            if totalNeeded ~= lastSpringTotal then
+                -- rebuild panel info
+                grp_spring:Clear()
+                pnl_springDynamic = {}
+                for _, fn in ipairs(newFlowers) do
+                    grp_spring:Header(fn)
+                    pnl_springDynamic[fn] = {}
+                    for _, txt in ipairs(springData[fn]) do
+                        local sv = grp_spring:Line(txt)
+                        table.insert(pnl_springDynamic[fn], sv)
+                    end
+                end
+                lastSpringTotal = totalNeeded
+            else
+                -- update teks panel info saja
+                for _, fn in ipairs(newFlowers) do
+                    local slots = pnl_springDynamic[fn]
+                    if slots then
+                        for j, txt in ipairs(springData[fn]) do
+                            if slots[j] then slots[j].Text = txt end
+                        end
+                    end
+                end
+            end
+        end
+
+    end
+end)
+
+-- TAB: WEBHOOK
+-- ================================================================
+local tabWebhook = win:Tab("Webhook")
+
+tabWebhook:Accordion("Webhook Settings", function(sec)
+
+    sec:TextInput("Webhook URL", "Paste URL disini...", function(v)
+        WebhookURL = v
+        Log("[Webhook] URL disimpan: " .. WebhookURL)
+        win:luluNotify("URL disimpan!", Color3.fromRGB(40, 180, 80))
+    end)
+
+end)
+
+tabWebhook:Accordion("Webhook Seed", function(sec)
+
+    -- Build options dari ShopFlower (nama aja)
+    local WebhookSeedOpts = {}
+    for _, item in ipairs(ShopFlower) do
+        table.insert(WebhookSeedOpts, item.name)
+    end
+
+    sec:MultiDropdown("Chose Seed", WebhookSeedOpts, {}, function(selected)
+        SelectedWebhookSeeds = {}
+        for _, name in ipairs(selected) do
+            table.insert(SelectedWebhookSeeds, name)
+        end
+        Log("[Webhook] Seeds dipilih: " .. #SelectedWebhookSeeds)
+    end)
+
+    sec:Toggle("Start Webhook", false, function(v)
+        WebhookSeedEnabled = v
+
+        if v then
+            if WebhookURL == "" then
+                win:luluNotify("Isi Webhook URL dulu!", Color3.fromRGB(220, 50, 50))
+                WebhookSeedEnabled = false
+                return
+            end
+            if #SelectedWebhookSeeds == 0 then
+                win:luluNotify("Pilih seed dulu!", Color3.fromRGB(220, 50, 50))
+                WebhookSeedEnabled = false
+                return
+            end
+            if WebhookSeedThread then return end
+            StartWebhookSeedLoop()
+            win:luluNotify("Webhook Seed aktif!", Color3.fromRGB(40, 180, 80))
+        else
+            WebhookSeedEnabled = false
+            win:luluNotify("Webhook Seed dihentikan", Color3.fromRGB(220, 50, 50))
+        end
+    end)
+
+    sec:Button("Test Webhook", function(done)
+        if WebhookURL == "" then
+            win:luluNotify("Isi Webhook URL dulu!", Color3.fromRGB(220, 50, 50))
+            done()
+            return
+        end
+        local msg = "[LuluXBee] Webhook Seed Test\nYour webhook seed is work!\nTime: " .. os.date("%Y-%m-%d %H:%M:%S")
+        local ok = SendDiscordWebhook(WebhookURL, msg)
+        win:luluNotify(
+            ok and "Test dikirim ke Discord!" or "Gagal kirim! Cek URL",
+            ok and Color3.fromRGB(40, 180, 80) or Color3.fromRGB(220, 50, 50)
+        )
+        done()
+    end, {color = Color3.fromRGB(40, 120, 255), loading = "Sending..."})
+
+end)
+
+-- TAB: SETTINGS
+-- ================================================================
+local tabSettings = win:Tab("Settings")
+
+tabSettings:Accordion("Performance", function(sec)
+
+    sec:Accordion("Perform", function(s)
+    s:Toggle("Show Perform", ShowInfo, function(v)
+        ShowInfo = v
+        if v then info:Show() else info:Hide() end
+    end)
+end)
+
+    sec:Accordion("Visual", function(s)
+        s:Toggle("Hide Flower&Hive", false, function(v)
+            HideAllEnabled = v
+            local m = GetMyPlotModel()
+            if not m then win:luluNotify("Plot not found!", Color3.fromRGB(220, 50, 50)) return end
+            local transparency = v and 1 or 0
+            local count = 0
+            local flowers = m:FindFirstChild("Flowers")
+            if flowers then
+                for _, flower in ipairs(flowers:GetChildren()) do
+                    for _, part in ipairs(flower:GetDescendants()) do
+                        if part:IsA("BasePart") or part:IsA("MeshPart") then
+                            part.Transparency = transparency; count = count + 1
+                        end
+                    end
+                end
+            end
+            local hives = m:FindFirstChild("Hives")
+            if hives then
+                for _, hive in ipairs(hives:GetChildren()) do
+                    for _, part in ipairs(hive:GetDescendants()) do
+                        if part:IsA("BasePart") or part:IsA("MeshPart") then
+                            part.Transparency = transparency; count = count + 1
+                        end
+                    end
+                end
+            end
+            win:luluNotify(count .. " parts " .. (v and "hidden" or "shown"), Color3.fromRGB(40, 120, 255))
+        end)
+
+        s:Toggle("Hide all plot", false, function(v)
+            local myModel = GetMyPlotModel()
+            if not myModel then win:luluNotify("Plot not found!", Color3.fromRGB(220, 50, 50)) return end
+            local count = 0
+            for _, part in ipairs(myModel:GetDescendants()) do
+                if part:IsA("BasePart") or part:IsA("MeshPart") then
+                    part.Transparency = v and 1 or 0; count = count + 1
+                end
+            end
+            win:luluNotify(count .. " parts " .. (v and "hidden" or "shown"), Color3.fromRGB(100, 110, 140))
+        end)
+    end)
+
+    sec:Accordion("Optimization", function(s)
+        s:Label("", {size = 10, color = Color3.fromRGB(150, 150, 180)})
+        s:Button("Delete Flowers", function()
+            local m = GetMyPlotModel()
+            if not m then win:luluNotify("Plot not found!", Color3.fromRGB(220, 50, 50)) return end
+            local flowers = m:FindFirstChild("Flowers")
+            if not flowers then win:luluNotify("Flowers not found!", Color3.fromRGB(220, 50, 50)) return end
+            local count = #flowers:GetChildren()
+            for _, f in ipairs(flowers:GetChildren()) do f:Destroy() end
+            win:luluNotify(count .. " flowers removed", Color3.fromRGB(220, 50, 50))
+        end, {color = Color3.fromRGB(200, 50, 50)})
+
+        s:Button("Delete Trees", function()
+            local count = 0
+            local world = workspace:FindFirstChild("World")
+            if world then
+                local bigTree      = world:FindFirstChild("BigTree")
+                local otherBigTree = world:FindFirstChild("OtherBigTree")
+                if bigTree      then bigTree:Destroy();      count = count + 1 end
+                if otherBigTree then otherBigTree:Destroy(); count = count + 1 end
+            end
+            win:luluNotify(count .. " trees removed", Color3.fromRGB(220, 50, 50))
+        end, {color = Color3.fromRGB(200, 50, 50)})
+
+        s:Button("Delete Other Plots", function()
+            local plotsFolder = workspace:FindFirstChild("Plots")
+            if not plotsFolder then
+                win:luluNotify("workspace.Plots not found!", Color3.fromRGB(220, 50, 50)) return
+            end
+            local myModel = GetMyPlotModel()
+            local count = 0
+            for _, plot in ipairs(plotsFolder:GetChildren()) do
+                if plot ~= myModel then plot:Destroy(); count = count + 1 end
+            end
+            win:luluNotify(count .. " plots removed", Color3.fromRGB(220, 50, 50))
+        end, {color = Color3.fromRGB(200, 50, 50)})
+
+        s:Button("Reduce Lag", function()
+            settings().Rendering.QualityLevel = 1
+            for _, v in pairs(game:GetService("Lighting"):GetChildren()) do
+                if v:IsA("PostEffect") then v.Enabled = false end
+            end
+            local pCount = 0
+            for _, obj in pairs(workspace:GetDescendants()) do
+                if obj:IsA("ParticleEmitter") or obj:IsA("Trail") or
+                   obj:IsA("Fire") or obj:IsA("Smoke") or obj:IsA("Sparkles") then
+                    obj.Enabled = false; pCount = pCount + 1
+                end
+            end
+            local myModel = GetMyPlotModel()
+            local cCount  = 0
+            for _, obj in pairs(workspace:GetDescendants()) do
+                if (obj:IsA("BasePart") or obj:IsA("MeshPart"))
+                   and not (myModel and obj:IsDescendantOf(myModel)) then
+                    obj.Color    = Color3.fromRGB(0, 0, 0)
+                    obj.Material = Enum.Material.SmoothPlastic
+                    cCount = cCount + 1
+                end
+            end
+            win:luluNotify(pCount .. " effects off | " .. cCount .. " parts black", Color3.fromRGB(40, 160, 60))
+        end, {color = Color3.fromRGB(200, 50, 50)})
+    end)
+
+end)
+
+tabSettings:Accordion("Config & Debug", function(sec)
+
+    sec:Accordion("Script Config", function(s)
+        s:Label("", {size = 10, color = Color3.fromRGB(150, 150, 180)})
+        s:Button("Reload Config", function()
+            local count = ReloadSeedConfig()
+            PrintSeedMappings()
+            win:luluNotify(count .. " mappings aktif", Color3.fromRGB(40, 120, 255))
+        end)
+        s:Button("Save JSON", function()
+            local ok = WriteJsonConfig(SeedNameMapping)
+            win:luluNotify(
+                ok and "seed_config.json saved!" or "Gagal — executor tidak support writefile",
+                ok and Color3.fromRGB(40, 180, 80) or Color3.fromRGB(220, 50, 50)
+            )
+        end)
+        s:Button("Show Mapping", function()
+            PrintSeedMappings()
+            local count = 0
+            for _ in pairs(SeedNameMapping) do count = count + 1 end
+            win:luluNotify(count .. " mappings — check console", Color3.fromRGB(40, 120, 255))
+        end)
+    end)
+
+    sec:Accordion("Debug Tools", function(s)
+        s:Label("", {size = 10, color = Color3.fromRGB(150, 150, 180)})
+        s:Button("Check Plot Status", function()
+            local m = GetMyPlotModel()
+            win:luluNotify(
+                m and "Plot found!" or "Plot NOT found!",
+                m and Color3.fromRGB(40, 180, 80) or Color3.fromRGB(220, 50, 50)
+            )
+        end)
+        s:Toggle("Console Log", false, function(v)
+            ConsoleEnabled = v
+            print(v and "Console ON" or "Console OFF")
+        end, { locked = true })
+    end, { locked = true})
+
+end)
+
+-- ================================================================
+-- ANTI-AFK NOTIFICATION (always active, shown on load)
+-- ================================================================
+task.wait(10)
+win:luluNotify("Anti-AFK Active", Color3.fromRGB(40, 180, 80))
+
+-- ================================================================
+print("========================================")
+print("LuluXBee v0.1.1 — LuluUI Edition Loaded!")
+print("========================================")
+PrintSeedMappings()
