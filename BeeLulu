@@ -1,5 +1,5 @@
 -- ================================================================
--- LuluXBee v0.2.0
+-- LuluXBee v0.25
 -- UI: LuluUI by Lulu_Attack
 -- ================================================================
 
@@ -208,7 +208,7 @@ local SellDelay        = 5
 local SpawnBeeDelay    = 10
 local BuyFlowerDelay   = 10
 local BuyItemsDelay    = 10
-local SmartLoopDelay   = 10   -- FIX: moved to global scope (was local to accordion)
+local SmartLoopDelay   = 10
 
 -- Shop selections
 local SelectedBuyFlowers   = {}
@@ -220,12 +220,27 @@ local SelectedSeed     = nil
 local PlantAllSeeds    = true
 local PlantAllPlots    = false
 local PlantMode        = "follow_player"
-local MoveStud         = 2
-local StartDirection   = 4
 local PlantY           = 1.5089991092681885
 
 local PlantedPositions     = {}
 local PlantCollisionRadius = 1.5
+
+-- ── Plant Type (Seed / Flower) ────────────────────────────────
+local PlantType               = "Seed"   -- "Seed" or "Flower"
+local ScannedPlantFlowers     = {}       -- {name → {id1, id2, ...}}  dari backpack
+local SelectedPlantFlowerName = nil      -- flower name yg dipilih untuk tanam
+
+-- ── Plot Grid Filter (Blue/Red line) ─────────────────────────
+local PlotLineFilterType = "All"   -- "All", "Blue", "Red"
+local PlotLineFilterNum  = "All"   -- "All", "Blue1"…"BlueN", "Red1"…"RedN"
+local GRID_STEP          = 2       -- stud antar posisi tanam di grid
+
+-- ESP Line Highlight
+local LineESPFolder      = nil     -- folder workspace untuk ESP line yg dipilih
+
+-- Find Plot (PlotESP v3 method)
+local PlotFound          = false
+local ResolvedPlotCoords = {}
 
 local AutoTradeEnabled       = false
 local TradeFlowerName        = nil
@@ -241,24 +256,19 @@ local HideAllEnabled = false
 -- ================================================================
 local WebhookURL           = ""
 
--- Buy Webhook (notif setiap auto buy seed berhasil)
-local BuyWebhookEnabled    = false      -- was: WebhookSeedEnabled
+local BuyWebhookEnabled    = false
 local WebhookBoughtQueue   = {}
 local WebhookLastBuyTime   = 0
 local WebhookFlushThread   = nil
 
--- Seed Webhook (kirim isi tas seed setiap delay)
 local SeedWebhookEnabled   = false
-local SeedWebhookDelay     = 5          -- minutes
-local SeedWebhookThread    = nil
+local SeedWebhookDelay     = 5
 
--- Status Webhook (kirim status script setiap delay)
 local StatusWebhookEnabled = false
-local StatusWebhookDelay   = 5          -- minutes
-local StatusWebhookThread  = nil
+local StatusWebhookDelay   = 5
 
 -- ================================================================
--- SETTINGS CONFIG SYSTEM (auto-save setiap setingan berubah)
+-- SETTINGS CONFIG SYSTEM
 -- ================================================================
 local SETTINGS_FILE = "luluxbee_settings.json"
 
@@ -275,10 +285,11 @@ local function SaveSettings()
         PlantAllSeeds        = PlantAllSeeds,
         PlantAllPlots        = PlantAllPlots,
         PlantMode            = PlantMode,
-        MoveStud             = MoveStud,
-        StartDirection       = StartDirection,
         PlantCollisionRadius = PlantCollisionRadius,
         PlantY               = PlantY,
+        PlantType            = PlantType,
+        PlotLineFilterType   = PlotLineFilterType,
+        PlotLineFilterNum    = PlotLineFilterNum,
         WebhookURL           = WebhookURL,
         SeedWebhookDelay     = SeedWebhookDelay,
         StatusWebhookDelay   = StatusWebhookDelay,
@@ -314,10 +325,11 @@ local function LoadSettings()
     if data.PlantAllSeeds ~= nil   then PlantAllSeeds        = data.PlantAllSeeds        end
     if data.PlantAllPlots ~= nil   then PlantAllPlots        = data.PlantAllPlots        end
     if data.PlantMode              then PlantMode            = data.PlantMode            end
-    if data.MoveStud               then MoveStud             = data.MoveStud             end
-    if data.StartDirection         then StartDirection       = data.StartDirection       end
     if data.PlantCollisionRadius   then PlantCollisionRadius = data.PlantCollisionRadius end
     if data.PlantY                 then PlantY               = data.PlantY               end
+    if data.PlantType              then PlantType            = data.PlantType            end
+    if data.PlotLineFilterType     then PlotLineFilterType   = data.PlotLineFilterType   end
+    if data.PlotLineFilterNum      then PlotLineFilterNum    = data.PlotLineFilterNum    end
     if data.WebhookURL             then WebhookURL           = data.WebhookURL           end
     if data.SeedWebhookDelay       then SeedWebhookDelay     = data.SeedWebhookDelay     end
     if data.StatusWebhookDelay     then StatusWebhookDelay   = data.StatusWebhookDelay   end
@@ -441,6 +453,9 @@ end
 -- HELPER FUNCTIONS
 -- ================================================================
 local function GetCoordinateByName(name)
+    if PlotFound and ResolvedPlotCoords[name] then
+        return ResolvedPlotCoords[name]
+    end
     for _, coord in ipairs(PlotCoordinates) do
         if coord.name == name then return coord end
     end
@@ -454,6 +469,46 @@ local function GetPlotCorners(plotNumber)
         p3 = GetCoordinateByName("plot" .. plotNumber .. ".3"),
         p4 = GetCoordinateByName("plot" .. plotNumber .. ".4"),
     }
+end
+
+-- ================================================================
+-- FIND PLOT (PlotESP v3 method)
+-- ================================================================
+local function FindPlotCoordinates()
+    local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+    if not root then
+        return false, "Character belum load!"
+    end
+
+    local AWAL_REF  = PlotCoordinates[1]
+    local playerPos = root.Position
+
+    local lookFlat = Vector3.new(root.CFrame.LookVector.X, 0, root.CFrame.LookVector.Z)
+    local playerCF = CFrame.new(playerPos, playerPos + lookFlat)
+
+    ResolvedPlotCoords = {}
+    local count = 0
+
+    for _, coord in ipairs(PlotCoordinates) do
+        if coord.name ~= "Awal" then
+            local dx = coord.x - AWAL_REF.x
+            local dy = coord.y - AWAL_REF.y
+            local dz = coord.z - AWAL_REF.z
+            local worldPos = playerCF * Vector3.new(dx, dy, dz)
+            ResolvedPlotCoords[coord.name] = {
+                name = coord.name,
+                x    = worldPos.X,
+                y    = worldPos.Y,
+                z    = worldPos.Z,
+            }
+            count = count + 1
+            Log(string.format("[FindPlot] %s → (%.2f, %.2f, %.2f)",
+                coord.name, worldPos.X, worldPos.Y, worldPos.Z))
+        end
+    end
+
+    PlotFound = true
+    return true, count .. " corners resolved"
 end
 
 local function TeleportPlayer(x, y, z)
@@ -474,6 +529,168 @@ end
 local function AddPlantedPosition(x, z) table.insert(PlantedPositions, {x=x, z=z}) end
 local function ClearPlantedPositions() PlantedPositions = {} end
 
+
+-- ================================================================
+-- GRID FUNCTIONS (Setting Plot system)
+-- Sort 4 corners → TL(A), TR(B), BL(C), BR(D)
+-- ================================================================
+local function SortCornersForGrid(c1, c2, c3, c4)
+    local pts = {c1, c2, c3, c4}
+    local cx, cz = 0, 0
+    for _, p in ipairs(pts) do cx = cx + p.x; cz = cz + p.z end
+    cx = cx / 4; cz = cz / 4
+    local top, bot = {}, {}
+    for _, p in ipairs(pts) do
+        if p.z < cz then table.insert(top, p) else table.insert(bot, p) end
+    end
+    if #top < 2 or #bot < 2 then
+        -- fallback: angle sort
+        local all = {}
+        for _, p in ipairs(pts) do
+            table.insert(all, {p = p, ang = math.atan2(p.z - cz, p.x - cx)})
+        end
+        table.sort(all, function(a, b) return a.ang < b.ang end)
+        return all[1].p, all[2].p, all[4].p, all[3].p
+    end
+    table.sort(top, function(a, b) return a.x < b.x end)
+    table.sort(bot, function(a, b) return a.x < b.x end)
+    -- A=TL, B=TR, C=BL, D=BR
+    return top[1], top[2], bot[1], bot[2]
+end
+
+-- Hitung semua posisi tanam dalam grid GRID_STEP×GRID_STEP stud
+-- A(TL), B(TR), C(BL), D(BR) sebagai tabel {x,y,z}
+-- Return: positions, colCount, rowCount
+local function ComputeGridPositions(A, B, C, D)
+    local aV = Vector3.new(A.x, A.y, A.z)
+    local bV = Vector3.new(B.x, B.y, B.z)
+    local cV = Vector3.new(C.x, C.y, C.z)
+    local dV = Vector3.new(D.x, D.y, D.z)
+
+    local countAB = math.floor((bV - aV).Magnitude / GRID_STEP)
+    local countAC = math.floor((cV - aV).Magnitude / GRID_STEP)
+
+    local positions = {}
+    for col = 0, countAB do
+        local t1      = countAB > 0 and (col / countAB) or 0
+        local pTop    = aV:Lerp(bV, t1)
+        local pBot    = cV:Lerp(dV, t1)
+        local blueName = "Blue" .. (col + 1)
+        for row = 0, countAC do
+            local t2     = countAC > 0 and (row / countAC) or 0
+            local pos    = pTop:Lerp(pBot, t2)
+            local redName = "Red" .. (row + 1)
+            table.insert(positions, {
+                name      = blueName .. "x" .. redName,
+                blue_line = blueName,
+                red_line  = redName,
+                col = col + 1,
+                row = row + 1,
+                x   = pos.X,
+                y   = pos.Y,
+                z   = pos.Z,
+            })
+        end
+    end
+    return positions, countAB + 1, countAC + 1
+end
+
+-- Generate opsi nomor line (Blue1..N atau Red1..N)
+-- berdasarkan plot yang sedang dipilih
+local function GetLineNumbers(lineType)
+    local opts = {"All Number"}
+    if lineType == "All" then return opts end
+    local plotNum = PlantAllPlots and 1 or (SelectedPlot or 1)
+    local corners = GetPlotCorners(plotNum)
+    if not corners.p1 then
+        -- fallback 20 lines
+        for i = 1, 20 do table.insert(opts, lineType .. i) end
+        return opts
+    end
+    local A, B, C, D = SortCornersForGrid(corners.p1, corners.p2, corners.p3, corners.p4)
+    local _, colCount, rowCount = ComputeGridPositions(A, B, C, D)
+    local count = lineType == "Blue" and colCount or rowCount
+    for i = 1, count do table.insert(opts, lineType .. i) end
+    return opts
+end
+
+-- ================================================================
+-- ESP LINE HIGHLIGHT
+-- Tampilkan ESP beam untuk line yang dipilih di Chose Number
+-- ================================================================
+local function ClearLineESP()
+    if LineESPFolder and LineESPFolder.Parent then
+        LineESPFolder:Destroy()
+    end
+    LineESPFolder = nil
+end
+
+local function MakeESPBeam(v1, v2, color)
+    local diff = v2 - v1
+    local dist = diff.Magnitude
+    if dist < 0.05 then return nil end
+    local mid  = (v1 + v2) / 2
+    local beam = Instance.new("Part")
+    beam.Anchored      = true
+    beam.CanCollide    = false
+    beam.CastShadow    = false
+    beam.Size          = Vector3.new(0.4, 0.4, dist)
+    beam.CFrame        = CFrame.new(mid, mid + diff.Unit)
+    beam.Color         = color
+    beam.Material      = Enum.Material.Neon
+    beam.Transparency  = 0.15
+    beam.Parent        = LineESPFolder
+    return beam
+end
+
+local function ShowSelectedLineESP()
+    ClearLineESP()
+    -- Kalau All Line atau All Number, ga perlu tampilkan
+    if PlotLineFilterType == "All" or PlotLineFilterNum == "All" then return end
+
+    local plotNum = PlantAllPlots and 1 or (SelectedPlot or 1)
+    local corners = GetPlotCorners(plotNum)
+    if not corners.p1 then return end
+
+    local A, B, C, D = SortCornersForGrid(corners.p1, corners.p2, corners.p3, corners.p4)
+    local aV = Vector3.new(A.x, A.y, A.z)
+    local bV = Vector3.new(B.x, B.y, B.z)
+    local cV = Vector3.new(C.x, C.y, C.z)
+    local dV = Vector3.new(D.x, D.y, D.z)
+
+    local countAB = math.floor((bV - aV).Magnitude / GRID_STEP)
+    local countAC = math.floor((cV - aV).Magnitude / GRID_STEP)
+
+    -- Tentukan index dari nomor line (Blue3 → idx 3)
+    local lineIdx = tonumber(PlotLineFilterNum:match("%d+"))
+    if not lineIdx then return end
+    local zeroIdx = lineIdx - 1
+
+    LineESPFolder = Instance.new("Folder")
+    LineESPFolder.Name   = "LuluLineESP"
+    LineESPFolder.Parent = workspace
+
+    local COLOR_BLUE = Color3.fromRGB(80, 160, 255)
+    local COLOR_RED  = Color3.fromRGB(255, 80,  80)
+
+    if PlotLineFilterType == "Blue" then
+        -- Blue line: dari AB lerp → CD lerp, tegak lurus
+        if zeroIdx > countAB then ClearLineESP() return end
+        local t  = (countAB > 0) and (zeroIdx / countAB) or 0
+        local p1 = aV:Lerp(bV, t)
+        local p2 = cV:Lerp(dV, t)
+        MakeESPBeam(p1, p2, COLOR_BLUE)
+
+    elseif PlotLineFilterType == "Red" then
+        -- Red line: dari AC lerp → BD lerp, horizontal
+        if zeroIdx > countAC then ClearLineESP() return end
+        local t  = (countAC > 0) and (zeroIdx / countAC) or 0
+        local p1 = aV:Lerp(cV, t)
+        local p2 = bV:Lerp(dV, t)
+        MakeESPBeam(p1, p2, COLOR_RED)
+    end
+end
+
 -- ================================================================
 -- CORE FUNCTIONS
 -- ================================================================
@@ -485,6 +702,33 @@ local function GetMyPlotModel()
     end
     LogWarn("Plot milikmu tidak ditemukan!")
     return nil
+end
+
+-- Load posisi bunga yang sudah ada di plot ke PlantedPositions
+-- supaya script tidak menanam di atas bunga yang sudah ada
+local function LoadExistingFlowerPositions()
+    PlantedPositions = {}
+    local myModel = GetMyPlotModel()
+    if not myModel then return end
+    local flowersFolder = myModel:FindFirstChild("Flowers")
+    if not flowersFolder then return end
+    for _, flower in ipairs(flowersFolder:GetChildren()) do
+        local pos
+        local hitbox = flower:FindFirstChild("Hitbox") or (flower.Name == "Hitbox" and flower)
+        if hitbox and hitbox:IsA("BasePart") then
+            pos = hitbox.Position
+        elseif flower.PrimaryPart then
+            pos = flower.PrimaryPart.Position
+        else
+            for _, part in ipairs(flower:GetDescendants()) do
+                if part:IsA("BasePart") then pos = part.Position; break end
+            end
+        end
+        if pos then
+            table.insert(PlantedPositions, {x = pos.X, z = pos.Z})
+        end
+    end
+    Log("[Plant] Loaded " .. #PlantedPositions .. " posisi bunga yang sudah ada")
 end
 
 local function GetMyHives()
@@ -522,10 +766,6 @@ end
 -- ================================================================
 -- BUY FUNCTIONS
 -- ================================================================
-
--- FIX: Pisahkan nama fungsi BuyAllStock untuk flower vs items
--- supaya tidak terjadi shadowing yang membingungkan
-
 local function BuyFlower(flowerName)
     ReplicatedStorage.Framework.Features.HoneySystem.FlowerUtil.RemoteEvent:FireServer("BuyFlower", flowerName)
 end
@@ -551,7 +791,6 @@ local function GetFlowerStock(flowerName)
     return success and stock or 0
 end
 
--- FIX: Renamed BuyAllFlowerStock (was BuyAllStock conflict)
 local function BuyAllFlowerStock(flowerName)
     local totalBought   = 0
     local initialStock  = GetFlowerStock(flowerName)
@@ -567,7 +806,6 @@ local function BuyAllFlowerStock(flowerName)
     return totalBought
 end
 
--- Return: bool, table {name, count}
 local function AutoBuySeeds(list)
     if not list or #list == 0 then return false, {} end
     local bought     = false
@@ -585,7 +823,6 @@ local function AutoBuySeeds(list)
     return bought, boughtList
 end
 
--- Buy Items
 local function BuyItems(itemsName)
     ReplicatedStorage.Framework.Features.FlowerTreeSystem.TreeToolUtil.RemoteEvent:FireServer("BuyTreeFertilizer", itemsName)
 end
@@ -610,7 +847,6 @@ local function GetItemsStock(itemsName)
     return success and stock or 0
 end
 
--- FIX: Renamed BuyAllItemsStock (was BuyAllStock conflict)
 local function BuyAllItemsStock(itemsName)
     local totalBought  = 0
     local initialStock = GetItemsStock(itemsName)
@@ -642,7 +878,6 @@ end
 -- ================================================================
 -- WEBHOOK FUNCTIONS
 -- ================================================================
-
 local function SendDiscordWebhook(url, payload)
     if not url or url == "" then
         Log("[Webhook] URL kosong!")
@@ -661,7 +896,6 @@ local function SendDiscordWebhook(url, payload)
     return ok
 end
 
--- Flush queue buy ke Discord
 local function FlushWebhookQueue()
     if #WebhookBoughtQueue == 0 then return end
     if WebhookURL == "" then WebhookBoughtQueue = {} return end
@@ -680,19 +914,16 @@ local function FlushWebhookQueue()
             title     = "🌸 Auto Buy Seed",
             color     = 0xB373F8,
             fields    = fields,
-            footer    = { text = "LuluXBee v0.2.0" },
+            footer    = { text = "LuluXBee v0.25" },
             timestamp = os.date("!%Y-%m-%dT%H:%M:%S")
         }}
     })
     WebhookBoughtQueue = {}
 end
 
--- Dipanggil setiap kali auto buy selesai satu ronde
--- FIX: renamed WebhookSeedEnabled -> BuyWebhookEnabled
 local function TrackWebhookBuy(boughtList)
     if not BuyWebhookEnabled then return end
     if WebhookURL == "" then return end
-    -- Semua seed yang dibeli masuk, tidak perlu filter (ga perlu pilih)
     for _, entry in ipairs(boughtList) do
         table.insert(WebhookBoughtQueue, entry)
     end
@@ -708,7 +939,6 @@ local function TrackWebhookBuy(boughtList)
     end)
 end
 
--- Seed Webhook: kirim semua seed di tas setiap delay menit
 local function SendSeedWebhook()
     if WebhookURL == "" then return end
     local backpack = player:WaitForChild("Backpack")
@@ -738,13 +968,12 @@ local function SendSeedWebhook()
             title       = "🌸 Seeds in Bag",
             description = desc,
             color       = 0x57F287,
-            footer      = { text = "Total: " .. #seeds .. " jenis • LuluXBee v0.2.0" },
+            footer      = { text = "Total: " .. #seeds .. " jenis • LuluXBee v0.25" },
             timestamp   = os.date("!%Y-%m-%dT%H:%M:%S")
         }}
     })
 end
 
--- Status Webhook: kirim status semua fitur yang aktif
 local function SendStatusWebhook()
     if WebhookURL == "" then return end
     local function onoff(v) return v and "🟢 ON" or "🔴 OFF" end
@@ -770,7 +999,9 @@ local function SendStatusWebhook()
     local plantVal = onoff(IsAutoPlantRunning)
     if IsAutoPlantRunning then
         local plotInfo = PlantAllPlots and "All Plots" or ("Plot " .. (SelectedPlot or "?"))
-        plantVal = "🟢 ON — " .. plotInfo
+        local lineInfo = PlotLineFilterType == "All" and "" or
+            (" | " .. PlotLineFilterType .. (PlotLineFilterNum ~= "All" and PlotLineFilterNum or ""))
+        plantVal = "🟢 ON — " .. PlantType .. " | " .. plotInfo .. lineInfo
     end
 
     SendDiscordWebhook(WebhookURL, {
@@ -790,7 +1021,7 @@ local function SendStatusWebhook()
                 { name = "Buy Webhook",     value = onoff(BuyWebhookEnabled),   inline = true },
                 { name = "Seed Webhook",    value = onoff(SeedWebhookEnabled) .. " (" .. SeedWebhookDelay .. " mnt)", inline = true },
             },
-            footer    = { text = "LuluXBee v0.2.0" },
+            footer    = { text = "LuluXBee v0.25" },
             timestamp = os.date("!%Y-%m-%dT%H:%M:%S")
         }}
     })
@@ -831,7 +1062,6 @@ end
 
 -- ================================================================
 -- AUTO TRADE
--- FIX: toggle UI reset setelah trade selesai (via callback ref)
 -- ================================================================
 local EXCLUDED_KEYWORDS = {"seed","fertilizer","deletetols","movetols","delete","move"}
 
@@ -843,6 +1073,12 @@ local function IsExcluded(itemName)
     return false
 end
 
+-- Strip mutasi dari nama item untuk keperluan lookup/send ke server
+-- "Bamboo [Gold]" → "Bamboo",  "Bamboo" → "Bamboo"
+local function GetBaseFlowerName(itemName)
+    return itemName:match("^(.-)%s*%[") or itemName
+end
+
 local function ScanBackpackFlowers()
     ScannedBackpackFlowers = {}
     local backpack = player:WaitForChild("Backpack")
@@ -852,18 +1088,23 @@ local function ScanBackpackFlowers()
             if uid then
                 local idNum = tonumber(uid)
                 if idNum then
+                    -- Key = display name (termasuk mutasi seperti "Bamboo [Gold]")
+                    -- supaya dropdown tampil lengkap
                     if not ScannedBackpackFlowers[item.Name] then
-                        ScannedBackpackFlowers[item.Name] = {}
+                        ScannedBackpackFlowers[item.Name] = {
+                            ids      = {},
+                            baseName = GetBaseFlowerName(item.Name), -- "Bamboo"
+                        }
                     end
-                    table.insert(ScannedBackpackFlowers[item.Name], idNum)
+                    table.insert(ScannedBackpackFlowers[item.Name].ids, idNum)
                 end
             end
         end
     end
     local count = 0
-    for name, ids in pairs(ScannedBackpackFlowers) do
-        count = count + #ids
-        Log("Found: " .. name .. " x" .. #ids)
+    for name, data in pairs(ScannedBackpackFlowers) do
+        count = count + #data.ids
+        Log("Found: " .. name .. " x" .. #data.ids .. " (base: " .. data.baseName .. ")")
     end
     Log("Scan selesai: " .. count .. " items")
     return ScannedBackpackFlowers
@@ -871,8 +1112,8 @@ end
 
 local function GetBackpackFlowerDropdownOptions()
     local opts = {}
-    for name, ids in pairs(ScannedBackpackFlowers) do
-        table.insert(opts, name .. "X" .. #ids)
+    for name, data in pairs(ScannedBackpackFlowers) do
+        table.insert(opts, name .. " X" .. #data.ids)
     end
     if #opts == 0 then table.insert(opts, "[Scan Backpack dulu]") end
     return opts
@@ -894,14 +1135,10 @@ local function GetPlayerDropdownOptions()
     return opts
 end
 
--- FIX: tradeToggleRef diisi dari UI section di bawah
-local tradeToggleRef = nil
-
 local function DoAutoTrade()
     if not TradeFlowerName  then Log("Pilih flower dulu!") return end
     if not TradeTargetPlayer then Log("Pilih target player dulu!") return end
 
-    -- FIX: validasi target player masih di game
     local targetStillInGame = false
     for _, p in ipairs(Players:GetPlayers()) do
         if p == TradeTargetPlayer then targetStillInGame = true break end
@@ -911,12 +1148,13 @@ local function DoAutoTrade()
         return
     end
 
-    local ids = ScannedBackpackFlowers[TradeFlowerName]
-    if not ids or #ids == 0 then Log("Tidak ada ID — scan ulang!") return end
+    local entry = ScannedBackpackFlowers[TradeFlowerName]
+    if not entry or #entry.ids == 0 then Log("Tidak ada ID — scan ulang!") return end
 
-    local toSend   = math.min(TradeAmount, #ids)
+    local ids    = entry.ids
+    local toSend    = math.min(TradeAmount, #ids)
     local sentCount = 0
-    local usedIds  = {}
+    local usedIds   = {}
 
     Log("Trade START | " .. TradeFlowerName .. " x" .. toSend)
 
@@ -947,6 +1185,9 @@ local function PlantSeedAt(seedType, x, y, z, mode, plotNum)
     if not IsPositionAvailable(x, z) then return false end
     local plantSeedName = GetPlantSeedName(seedType)
     Log("Tanam [".. plantSeedName .. "] Plot " .. (plotNum or "?"))
+
+    local countBefore = GetSeedCount(seedType)
+
     if mode == "follow_player" then
         TeleportPlayer(x, y, z)
         local playerPos = player.Character.HumanoidRootPart.Position
@@ -958,7 +1199,6 @@ local function PlantSeedAt(seedType, x, y, z, mode, plotNum)
         pcall(function()
             ReplicatedStorage.Framework.Features.HoneySystem.FlowerUtil.RemoteFunction:InvokeServer(unpack(args))
         end)
-        AddPlantedPosition(playerPos.X, playerPos.Z)
     else
         local args = {
             "PlaceFlower", plantSeedName,
@@ -968,56 +1208,148 @@ local function PlantSeedAt(seedType, x, y, z, mode, plotNum)
         pcall(function()
             ReplicatedStorage.Framework.Features.HoneySystem.FlowerUtil.RemoteFunction:InvokeServer(unpack(args))
         end)
-        AddPlantedPosition(x, z)
     end
     wait(0.8)
-    return true
-end
 
-local function LinearInterpolate(startPos, endPos, steps)
-    local positions = {}
-    for i = 0, steps do
-        local t = steps > 0 and (i / steps) or 0
-        table.insert(positions, {
-            x = startPos.x + (endPos.x - startPos.x) * t,
-            y = startPos.y + (endPos.y - startPos.y) * t,
-            z = startPos.z + (endPos.z - startPos.z) * t,
-        })
+    -- Cek apakah seed berkurang = tanam sukses
+    local countAfter = GetSeedCount(seedType)
+    if countAfter < countBefore then
+        -- Sukses: simpan posisi supaya tidak ditanam lagi
+        if mode == "follow_player" then
+            local playerPos = player.Character and player.Character.HumanoidRootPart
+            if playerPos then AddPlantedPosition(playerPos.Position.X, playerPos.Position.Z) end
+        else
+            AddPlantedPosition(x, z)
+        end
+        Log("[Seed] Sukses: " .. plantSeedName .. " (" .. countBefore .. "→" .. countAfter .. ")")
+        return true
+    else
+        Log("[Seed] Gagal tanam di posisi ini (mungkin sudah ada tanaman), skip...")
+        return false
     end
-    return positions
 end
 
-local function AutoPlantZigZag(seedName, plotNumber, mode)
-    local corners = GetPlotCorners(plotNumber)
-    if not corners.p1 then Log("Plot " .. plotNumber .. " tidak ditemukan") return 0 end
-    local startCorner = StartDirection == 3 and corners.p3 or corners.p4
-    local endCorner   = StartDirection == 3 and corners.p1 or corners.p2
-    local stepsAlong  = math.floor(math.abs(endCorner.z - startCorner.z) / MoveStud)
-    local stepsAcross = math.floor(math.abs(corners.p1.x - corners.p2.x) / MoveStud)
-    local totalPlanted = 0
-    for row = 0, stepsAcross do
-        if not AutoPlantEnabled then break end
-        if GetSeedCount(seedName) <= 0 then Log("Seed " .. seedName .. " habis") break end
-        local t = stepsAcross > 0 and (row / stepsAcross) or 0
-        local rowStartX = startCorner.x + (endCorner.x - startCorner.x) * t
-        local rowEndX   = rowStartX
-        local rowStartZ = startCorner.z
-        local rowEndZ   = endCorner.z
-        local forward   = row % 2 == 0
-        local positions = LinearInterpolate(
-            {x=rowStartX, y=startCorner.y, z = forward and rowStartZ or rowEndZ},
-            {x=rowEndX,   y=startCorner.y, z = forward and rowEndZ   or rowStartZ},
-            stepsAlong
-        )
-        for _, pos in ipairs(positions) do
-            if not AutoPlantEnabled then break end
-            if GetSeedCount(seedName) <= 0 then break end
-            if PlantSeedAt(seedName, pos.x, pos.y, pos.z, mode, plotNumber) then
-                totalPlanted = totalPlanted + 1
+-- ================================================================
+-- FLOWER PLANT FUNCTIONS (MoveFlower)
+-- ================================================================
+local function ScanPlantFlowers()
+    ScannedPlantFlowers = {}
+    local backpack = player:WaitForChild("Backpack")
+    for _, item in ipairs(backpack:GetChildren()) do
+        if not IsExcluded(item.Name) then
+            local uid = item:GetAttribute("UniqueId")
+            if uid then
+                local idNum = tonumber(uid)
+                if idNum then
+                    -- Key = display name (termasuk mutasi) untuk dropdown
+                    if not ScannedPlantFlowers[item.Name] then
+                        ScannedPlantFlowers[item.Name] = {
+                            ids      = {},
+                            baseName = GetBaseFlowerName(item.Name),
+                        }
+                    end
+                    table.insert(ScannedPlantFlowers[item.Name].ids, idNum)
+                end
             end
         end
     end
-    return totalPlanted
+    local n = 0
+    for _, data in pairs(ScannedPlantFlowers) do n = n + #data.ids end
+    Log("[PlantFlower] Scanned: " .. n .. " items")
+end
+
+-- Cek apakah flower dengan UniqueId tertentu masih ada di backpack
+local function IsFlowerInBackpack(flowerId)
+    local backpack = player:WaitForChild("Backpack")
+    for _, item in ipairs(backpack:GetChildren()) do
+        local uid = item:GetAttribute("UniqueId")
+        if uid and tonumber(uid) == flowerId then
+            return true
+        end
+    end
+    return false
+end
+
+local function PlantFlowerAt(flowerId, x, y, z, mode)
+    -- Cek sebelum: flower harus ada di backpack
+    if not IsFlowerInBackpack(flowerId) then
+        Log("[Flower] ID " .. flowerId .. " tidak ada di backpack, skip")
+        return false
+    end
+
+    local cf
+    if mode == "follow_player" then
+        TeleportPlayer(x, y, z)
+        local playerPos = player.Character.HumanoidRootPart.Position
+        cf = CFrame.new(playerPos.X, PlantY, playerPos.Z)
+            * CFrame.Angles(0, -0.570144534111023, 0)
+    else
+        cf = CFrame.new(x, PlantY, z)
+            * CFrame.Angles(0, -0.570144534111023, 0)
+    end
+    pcall(function()
+        ReplicatedStorage.Framework.Features.HoneySystem.FlowerUtil.RemoteFunction:InvokeServer(
+            "MoveFlower", flowerId, cf
+        )
+    end)
+    wait(0.8)
+
+    -- Cek sesudah: kalau flower masih di backpack = gagal (posisi ditempati)
+    if IsFlowerInBackpack(flowerId) then
+        Log("[Flower] ID " .. flowerId .. " masih di backpack = gagal, posisi mungkin sudah ada tanaman, skip...")
+        return false
+    end
+
+    Log("[Flower] ID " .. flowerId .. " sukses dipindah ke plot")
+    return true
+end
+
+-- ================================================================
+-- AUTO PLANT GRID
+-- Sistem tanam berbasis grid (Blue/Red lines)
+-- Filter posisi via PlotLineFilterType + PlotLineFilterNum
+-- ================================================================
+local function AutoPlantGrid(itemName, plotNumber, mode, isFlower, flowerIds)
+    local corners = GetPlotCorners(plotNumber)
+    if not corners.p1 then Log("Plot " .. plotNumber .. " tidak ditemukan") return 0 end
+
+    local A, B, C, D = SortCornersForGrid(corners.p1, corners.p2, corners.p3, corners.p4)
+    local positions  = ComputeGridPositions(A, B, C, D)
+
+    -- Filter berdasarkan PlotLineFilterType & PlotLineFilterNum
+    local filtered = {}
+    for _, pos in ipairs(positions) do
+        local pass = true
+        if PlotLineFilterType == "Blue" then
+            pass = (PlotLineFilterNum == "All") or (pos.blue_line == PlotLineFilterNum)
+        elseif PlotLineFilterType == "Red" then
+            pass = (PlotLineFilterNum == "All") or (pos.red_line == PlotLineFilterNum)
+        end
+        if pass then table.insert(filtered, pos) end
+    end
+
+    local planted   = 0
+    local flowerIdx = 1
+
+    for _, pos in ipairs(filtered) do
+        if not AutoPlantEnabled then break end
+        if isFlower then
+            if not flowerIds or flowerIdx > #flowerIds then break end
+            -- Coba tanam, geser flowerIdx hanya kalau sukses
+            local ok = PlantFlowerAt(flowerIds[flowerIdx], pos.x, pos.y, pos.z, mode)
+            if ok then
+                flowerIdx = flowerIdx + 1
+                planted   = planted + 1
+            end
+            -- Kalau gagal: flowerIdx tetap, flower yang sama dicoba di posisi grid berikutnya
+        else
+            if GetSeedCount(itemName) <= 0 then Log("Seed " .. itemName .. " habis") break end
+            if PlantSeedAt(itemName, pos.x, pos.y, pos.z, mode, plotNumber) then
+                planted = planted + 1
+            end
+        end
+    end
+    return planted
 end
 
 local function ContinuousAutoPlant()
@@ -1029,7 +1361,7 @@ local function ContinuousAutoPlant()
             wait(5)
         else
             AutoPlantEnabled = true
-            ClearPlantedPositions()
+            LoadExistingFlowerPositions()
             local seedsToPlant = {}
             if #SelectedPlantFlowers > 0 then
                 for _, s in ipairs(seeds) do
@@ -1054,7 +1386,7 @@ local function ContinuousAutoPlant()
                 for _, seedName in ipairs(seedsToPlant) do
                     if not IsAutoPlantRunning then break end
                     if GetSeedCount(seedName) > 0 then
-                        AutoPlantZigZag(seedName, plotNum, PlantMode)
+                        AutoPlantGrid(seedName, plotNum, PlantMode, false, nil)
                         wait(1)
                     end
                 end
@@ -1091,7 +1423,7 @@ LuluUI.SetTheme("Purple")
 
 local win = LuluUI.new({
     title    = "LuluXBee",
-    subtitle = "v0.2.0",
+    subtitle = "v0.25",
     name     = "LuluXBeeGui",
     width    = 340,
     height   = 300,
@@ -1200,10 +1532,20 @@ local tabInfo = win:Tab("Info")
 
 tabInfo:Accordion("Script Info", function(sec)
     sec:Label("LuluXBee",             {size = 14, bold = true})
-    sec:Label("Version: v0.2.0",      {size = 10, color = Color3.fromRGB(40, 160, 60)})
-    sec:Badge("BETA",                 {color = Color3.fromRGB(40, 120, 255)})
+    sec:Label("Version: v0.25",       {size = 10, color = Color3.fromRGB(40, 160, 60)})
+    sec:Badge("RELEASE",              {color = Color3.fromRGB(60, 200, 120)})
+
     sec:Label("Bee Game Auto Script", {size = 10, color = Color3.fromRGB(150, 150, 180)})
     sec:Label("by Lulu_Attack",       {size = 10, color = Color3.fromRGB(150, 150, 180)})
+
+    sec:Divider()
+
+    sec:Label("What's New:",          {size = 11, bold = true})
+    sec:Label("- Add Webhook System", {size = 10})
+    sec:Label("- Auto Plant Flower",  {size = 10})
+    sec:Label("- New Plant System",   {size = 10})
+    sec:Label("- Biggest Update Ever",{size = 10})
+    sec:Label("- ReMap Ui Plant",{size = 10})
 end)
 
 tabInfo:Accordion("Discord", function(sec)
@@ -1491,7 +1833,6 @@ end)
 
 -- ================================================================
 -- TRADE SYSTEM
--- FIX: simpan referensi toggle untuk auto-reset setelah trade selesai
 -- ================================================================
 tabHome:Accordion("Trade System", function(s)
     local flowerDrop = s:Dropdown("Flower", {"[Scan dulu]"}, "[Scan dulu]", function(value)
@@ -1511,7 +1852,7 @@ tabHome:Accordion("Trade System", function(s)
         local opts  = GetBackpackFlowerDropdownOptions()
         flowerDrop:SetOptions(opts)
         local count = 0
-        for _, ids in pairs(ScannedBackpackFlowers) do count = count + #ids end
+        for _, data in pairs(ScannedBackpackFlowers) do count = count + #data.ids end
         win:luluNotify(count .. " flower item(s) ditemukan", Color3.fromRGB(40, 120, 255))
         done()
     end, {color = Color3.fromRGB(40, 120, 255), loading = "Scanning Flower..."})
@@ -1527,42 +1868,34 @@ tabHome:Accordion("Trade System", function(s)
         TradeAmount = v
     end)
 
-    -- FIX: simpan referensi ke tradeToggleRef untuk reset otomatis
-    tradeToggleRef = s:Toggle("Enable", false, function(v)
-        AutoTradeEnabled = v
-        if v then
-            if not TradeFlowerName then
-                win:luluNotify("Pilih flower dulu!", Color3.fromRGB(220, 50, 50))
-                AutoTradeEnabled = false
-                -- FIX: reset toggle
-                if tradeToggleRef and tradeToggleRef.SetValue then
-                    tradeToggleRef:SetValue(false)
-                end
-                return
-            end
-            if not TradeTargetPlayer then
-                win:luluNotify("Pilih player dulu!", Color3.fromRGB(220, 50, 50))
-                AutoTradeEnabled = false
-                if tradeToggleRef and tradeToggleRef.SetValue then
-                    tradeToggleRef:SetValue(false)
-                end
-                return
-            end
-            win:luluNotify("Trade dimulai!", Color3.fromRGB(40, 180, 80))
-            spawn(function()
-                DoAutoTrade()
-                AutoTradeEnabled = false
-                -- FIX: reset toggle UI setelah trade selesai
-                if tradeToggleRef and tradeToggleRef.SetValue then
-                    tradeToggleRef:SetValue(false)
-                end
-                win:luluNotify("Trade selesai!", Color3.fromRGB(40, 180, 80))
-            end)
-        else
-            AutoTradeEnabled = false
-            Log("Trade force stopped")
+    s:Button("Start Trade", function(done)
+        if not TradeFlowerName then
+            win:luluNotify("Pilih flower dulu!", Color3.fromRGB(220, 50, 50))
+            return done()
         end
-    end)
+        if not TradeTargetPlayer then
+            win:luluNotify("Pilih player dulu!", Color3.fromRGB(220, 50, 50))
+            return done()
+        end
+        if AutoTradeEnabled then
+            win:luluNotify("Trade sedang berjalan!", Color3.fromRGB(220, 140, 20))
+            return done()
+        end
+        AutoTradeEnabled = true
+        win:luluNotify("Trade dimulai!", Color3.fromRGB(40, 180, 80))
+        spawn(function()
+            DoAutoTrade()
+            AutoTradeEnabled = false
+            win:luluNotify("Trade selesai!", Color3.fromRGB(40, 180, 80))
+            done()
+        end)
+    end, {color = Color3.fromRGB(40, 160, 60), loading = "Trading..."})
+
+    s:Button("Stop Trade", function(done)
+        AutoTradeEnabled = false
+        win:luluNotify("Trade dihentikan!", Color3.fromRGB(220, 50, 50))
+        done()
+    end, {color = Color3.fromRGB(200, 50, 50)})
 end)
 
 -- ================================================================
@@ -1570,57 +1903,45 @@ end)
 -- ================================================================
 local tabPlant = win:Tab("Auto Plant")
 
+-- ── Set up System ─────────────────────────────────────────────
 tabPlant:Accordion("Set up System", function(sec)
 
-    sec:Accordion("Seed", function(s)
-        local seedDrop = s:Dropdown("Pilih Seed", {"[All Seeds]"}, "[All Seeds]", function(value)
-            if value == "[All Seeds]" then
-                PlantAllSeeds = true; SelectedSeed = nil
-            elseif not value:match("%[No seeds") then
-                PlantAllSeeds = false
-                SelectedSeed = value:match("(.-)%s+%[x") or value
-            end
-            SaveSettings()
-        end)
+    sec:Label(" Click Beehive before run", {
+        size  = 11,
+        bold  = true,
+        color = Color3.fromRGB(220, 180, 20),
+    })
 
-        s:Button("Refresh", function(done)
-            local seeds   = GetAllSeeds()
-            local newOpts = {"[All Seeds]"}
-            for _, sd in ipairs(seeds) do
-                table.insert(newOpts, sd.Name .. " [x" .. sd.Count .. "]")
-            end
-            seedDrop:SetOptions(newOpts)
-            SelectedSeed  = nil
-            PlantAllSeeds = true
-            win:luluNotify(#seeds .. " seed(s) ditemukan", Color3.fromRGB(40, 120, 255))
-            done()
-        end, {color = Color3.fromRGB(40, 120, 255), loading = "Refreshing..."})
-
-        s:Button("Clear Cache", function(done)
-            local count = #PlantedPositions
-            ClearPlantedPositions()
-            win:luluNotify(count .. " positions cleared", Color3.fromRGB(100, 110, 140))
-            done()
-        end, {color = Color3.fromRGB(100, 110, 140), loading = "Clearing..."})
-
-        local PlantFlowerOpts = {}
-        for _, item in ipairs(ShopFlower) do
-            table.insert(PlantFlowerOpts, item.name)
+    sec:Button("Find Plot", function(done)
+        local ok, msg = FindPlotCoordinates()
+        if ok then
+            win:luluNotify("✓ " .. msg, Color3.fromRGB(40, 180, 80))
+        else
+            win:luluNotify("✗ " .. msg, Color3.fromRGB(220, 50, 50))
         end
-        s:MultiDropdown("Chose", PlantFlowerOpts, {}, function(selected)
-            SelectedPlantFlowers = {}
-            for _, name in ipairs(selected) do
-                table.insert(SelectedPlantFlowers, name)
-            end
-            SaveSettings()
-        end)
+        done()
+    end, {color = Color3.fromRGB(40, 120, 255), loading = "Finding Plot..."})
+
+end)
+
+-- ── Plant System ───────────────────────────────────────────────
+tabPlant:Accordion("Plant System", function(sec)
+
+    sec:Segment("Mode", {"Follow Player", "Coordinate"}, "Follow Player", function(v)
+        PlantMode = v == "Follow Player" and "follow_player" or "follow_coordinate"
+        SaveSettings()
     end)
 
-    sec:Dropdown("Plot",
-        {"[All Plots]","Plot 1","Plot 2","Plot 3","Plot 4","Plot 5","Plot 6"},
-        "[All Plots]",
+end)
+
+-- ── Setting Plot ───────────────────────────────────────────────
+tabPlant:Accordion("Setting Plot", function(sec)
+
+    sec:Dropdown("Chose Plot",
+        {"All Plot","Plot 1","Plot 2","Plot 3","Plot 4","Plot 5","Plot 6"},
+        PlantAllPlots and "All Plot" or ("Plot " .. (SelectedPlot or 1)),
         function(value)
-            if value == "[All Plots]" then
+            if value == "All Plot" then
                 PlantAllPlots = true; SelectedPlot = nil
             else
                 PlantAllPlots = false
@@ -1630,36 +1951,143 @@ tabPlant:Accordion("Set up System", function(sec)
         end
     )
 
+    sec:Dropdown("Chose Line",
+        {"All Line", "Blue", "Red"},
+        "All Line",
+        function(value)
+            if value == "All Line" then
+                PlotLineFilterType = "All"
+                PlotLineFilterNum  = "All"
+                if _G.SetLineNumDropOptions then
+                    _G.SetLineNumDropOptions({"All Number"})
+                end
+                ClearLineESP()
+            else
+                PlotLineFilterType = value
+                PlotLineFilterNum  = "All"
+                if _G.SetLineNumDropOptions then
+                    _G.SetLineNumDropOptions(GetLineNumbers(value))
+                end
+                ClearLineESP()
+            end
+            SaveSettings()
+        end
+    )
+
 end)
 
-tabPlant:Accordion("Plant System", function(sec)
+-- ── Plant ──────────────────────────────────────────────────────
+tabPlant:Accordion("Plant", function(sec)
 
-    sec:Segment("Mode", {"Follow Player", "Coordinate"}, "Follow Player", function(v)
-        PlantMode = v == "Follow Player" and "follow_player" or "follow_coordinate"
+    sec:Segment("Chose plant", {"Seed", "Flower"}, PlantType, function(v)
+        PlantType = v
         SaveSettings()
     end)
 
-    sec:Accordion("Advanced Config", function(s)
-        s:NumberInput("Distance (studs)", MoveStud, 0.5, 1, 10, function(v)
-            MoveStud = v; SaveSettings()
-        end)
-        s:Dropdown("Direction", {"Start from .3","Start from .4"}, "Start from .4", function(value)
-            StartDirection = tonumber(value:match("%.(%d)")) or 4
-            SaveSettings()
-        end)
-        s:NumberInput("Collision Radius (studs)", PlantCollisionRadius, 0.5, 0.5, 5, function(v)
-            PlantCollisionRadius = v; SaveSettings()
-        end)
-        s:NumberInput("Plant Y", PlantY, 0.1, -5, 10, function(v)
-            PlantY = v; SaveSettings()
-        end)
-    end)
+    sec:Button("Scan Seed", function(done)
+        local seeds = GetAllSeeds()
+        local opts  = {"[All Seeds]"}
+        for _, sd in ipairs(seeds) do
+            table.insert(opts, sd.Name .. " [x" .. sd.Count .. "]")
+        end
+        if _G.SetSeedDropOptions then
+            _G.SetSeedDropOptions(opts)
+        end
+        win:luluNotify(#seeds .. " seed(s) ditemukan", Color3.fromRGB(40, 120, 255))
+        done()
+    end, {color = Color3.fromRGB(40, 120, 255), loading = "Scanning Seed..."})
+
+    sec:Button("Scan Flower", function(done)
+        ScanPlantFlowers()
+        local opts = {}
+        for name, data in pairs(ScannedPlantFlowers) do
+            table.insert(opts, name .. " X" .. #data.ids)
+        end
+        if #opts == 0 then table.insert(opts, "[Tidak ada bunga]") end
+        if _G.SetFlowerDropOptions then
+            _G.SetFlowerDropOptions(opts)
+        end
+        local count = 0
+        for _, data in pairs(ScannedPlantFlowers) do count = count + #data.ids end
+        win:luluNotify(count .. " flower(s) ditemukan", Color3.fromRGB(40, 120, 255))
+        done()
+    end, {color = Color3.fromRGB(40, 120, 255), loading = "Scanning Flower..."})
+
+    sec:Button("Clear Cache", function(done)
+        local count = #PlantedPositions
+        ClearPlantedPositions()
+        win:luluNotify(count .. " positions cleared", Color3.fromRGB(100, 110, 140))
+        done()
+    end, {color = Color3.fromRGB(100, 110, 140), loading = "Clearing..."})
 
 end)
 
-tabPlant:Accordion("Control plant", function(sec)
+-- ── Control Plant ──────────────────────────────────────────────
+tabPlant:Accordion("Control Plant", function(sec)
+
+    -- Chose Number (di-update dari Chose Line di Setting Plot)
+    local lineNumDrop = sec:Dropdown("Chose Number", {"All Number"}, "All Number", function(value)
+        PlotLineFilterNum = (value == "All Number") and "All" or value
+        SaveSettings()
+        if PlotLineFilterNum == "All" then
+            ClearLineESP()
+        else
+            ShowSelectedLineESP()
+        end
+    end)
+
+    _G.SetLineNumDropOptions = function(opts)
+        lineNumDrop:SetOptions(opts)
+    end
+
+    -- Chose Seed (di-populate dari Scan Seed di accordion Plant)
+    local seedDrop = sec:Dropdown("Chose Seed", {"[Scan dulu]"}, "[Scan dulu]", function(value)
+        if value:find("%[") then SelectedSeed = nil; return end
+        PlantAllSeeds = false
+        SelectedSeed  = value:match("(.-)%s+%[x") or value
+        SaveSettings()
+    end)
+
+    _G.SetSeedDropOptions = function(opts)
+        seedDrop:SetOptions(opts)
+    end
+
+    -- All Seeds toggle
+    sec:Toggle("All Seeds", PlantAllSeeds, function(v)
+        PlantAllSeeds = v
+        if v then SelectedSeed = nil end
+        SaveSettings()
+    end)
+
+    -- Seed Shop — multi dropdown, opsi static dari ShopFlower
+    local seedShopOpts = {}
+    for _, item in ipairs(ShopFlower) do
+        table.insert(seedShopOpts, item.name)
+    end
+    sec:MultiDropdown("Seed Shop", seedShopOpts, {}, function(selected)
+        SelectedPlantFlowers = {}
+        for _, name in ipairs(selected) do
+            table.insert(SelectedPlantFlowers, name)
+        end
+        SaveSettings()
+    end)
+
+    -- Chose Flower (di-populate dari Scan Flower di accordion Plant)
+    local flowerPlantDrop = sec:Dropdown("Chose Flower", {"[Scan dulu]"}, "[Scan dulu]", function(value)
+        if value:find("%[") then SelectedPlantFlowerName = nil; return end
+        SelectedPlantFlowerName = value:match("(.-)%s+X%d+") or value
+    end)
+
+    _G.SetFlowerDropOptions = function(opts)
+        flowerPlantDrop:SetOptions(opts)
+    end
+
     sec:Toggle("Loop Plant", false, function(v)
         if v then
+            if not PlotFound then
+                win:luluNotify("Find your plot first!", Color3.fromRGB(220, 50, 50))
+                return
+            end
             if IsAutoPlantRunning then
                 win:luluNotify("Loop sudah jalan!", Color3.fromRGB(220, 140, 20))
                 return
@@ -1675,46 +2103,85 @@ tabPlant:Accordion("Control plant", function(sec)
     end)
 
     sec:Button("Start Once", function(done)
-        if not PlantAllSeeds and not SelectedSeed then
-            win:luluNotify("Pilih seed dulu!", Color3.fromRGB(220, 50, 50))
-            done(); return
+        if not PlotFound then
+            win:luluNotify("Find your plot first!", Color3.fromRGB(220, 50, 50))
+            return done()
         end
-        ClearPlantedPositions()
+        LoadExistingFlowerPositions()
         AutoPlantEnabled = true
-        local seedsToPlant = {}
-        local allSeeds = GetAllSeeds()
-        if #SelectedPlantFlowers > 0 then
-            for _, s in ipairs(allSeeds) do
-                local internalName = GetPlantSeedName(s.Name)
-                for _, chosen in ipairs(SelectedPlantFlowers) do
-                    if internalName == chosen then table.insert(seedsToPlant, s.Name) break end
-                end
-            end
-        elseif PlantAllSeeds then
-            for _, s in ipairs(allSeeds) do table.insert(seedsToPlant, s.Name) end
-        else
-            table.insert(seedsToPlant, SelectedSeed)
-        end
+
         local plotsToPlant = {}
         if PlantAllPlots then for i = 1, 6 do table.insert(plotsToPlant, i) end
         else table.insert(plotsToPlant, SelectedPlot) end
-        win:luluNotify("Auto Plant dimulai!", Color3.fromRGB(40, 180, 80))
-        spawn(function()
-            local total = 0
-            for _, plotNum in ipairs(plotsToPlant) do
-                if not AutoPlantEnabled then break end
-                for _, seedName in ipairs(seedsToPlant) do
+
+        if PlantType == "Flower" then
+            if not SelectedPlantFlowerName then
+                win:luluNotify("Scan & pilih flower dulu!", Color3.fromRGB(220, 50, 50))
+                AutoPlantEnabled = false
+                return done()
+            end
+            local entry = ScannedPlantFlowers[SelectedPlantFlowerName]
+            local ids = entry and entry.ids
+            if not ids or #ids == 0 then
+                win:luluNotify("Flower ID kosong! Scan ulang.", Color3.fromRGB(220, 50, 50))
+                AutoPlantEnabled = false
+                return done()
+            end
+            win:luluNotify("Plant Flower dimulai!", Color3.fromRGB(40, 180, 80))
+            spawn(function()
+                local total = 0
+                for _, plotNum in ipairs(plotsToPlant) do
                     if not AutoPlantEnabled then break end
-                    if GetSeedCount(seedName) > 0 then
-                        total = total + AutoPlantZigZag(seedName, plotNum, PlantMode)
-                        wait(1)
+                    total = total + AutoPlantGrid(
+                        SelectedPlantFlowerName, plotNum, PlantMode, true, ids
+                    )
+                end
+                AutoPlantEnabled = false
+                win:luluNotify(total .. " flowers moved!", Color3.fromRGB(40, 180, 80))
+                done()
+            end)
+        else
+            if not PlantAllSeeds and not SelectedSeed and #SelectedPlantFlowers == 0 then
+                win:luluNotify("Pilih seed dulu!", Color3.fromRGB(220, 50, 50))
+                AutoPlantEnabled = false
+                done(); return
+            end
+            local seedsToPlant = {}
+            local allSeeds = GetAllSeeds()
+            if #SelectedPlantFlowers > 0 then
+                -- Seed Shop: match nama ShopFlower ke nama seed di inventori
+                for _, s in ipairs(allSeeds) do
+                    local internalName = GetPlantSeedName(s.Name)
+                    for _, chosen in ipairs(SelectedPlantFlowers) do
+                        if internalName == chosen then
+                            table.insert(seedsToPlant, s.Name)
+                            break
+                        end
                     end
                 end
+            elseif PlantAllSeeds then
+                for _, s in ipairs(allSeeds) do table.insert(seedsToPlant, s.Name) end
+            else
+                table.insert(seedsToPlant, SelectedSeed)
             end
-            AutoPlantEnabled = false
-            win:luluNotify(total .. " seeds planted!", Color3.fromRGB(40, 180, 80))
-            done()
-        end)
+            win:luluNotify("Auto Plant dimulai!", Color3.fromRGB(40, 180, 80))
+            spawn(function()
+                local total = 0
+                for _, plotNum in ipairs(plotsToPlant) do
+                    if not AutoPlantEnabled then break end
+                    for _, seedName in ipairs(seedsToPlant) do
+                        if not AutoPlantEnabled then break end
+                        if GetSeedCount(seedName) > 0 then
+                            total = total + AutoPlantGrid(seedName, plotNum, PlantMode, false, nil)
+                            wait(1)
+                        end
+                    end
+                end
+                AutoPlantEnabled = false
+                win:luluNotify(total .. " seeds planted!", Color3.fromRGB(40, 180, 80))
+                done()
+            end)
+        end
     end, {color = Color3.fromRGB(40, 160, 60), loading = "Planting..."})
 
     sec:Button("Stop", function()
@@ -1722,7 +2189,9 @@ tabPlant:Accordion("Control plant", function(sec)
         IsAutoPlantRunning = false
         win:luluNotify("Auto Plant dihentikan!", Color3.fromRGB(220, 50, 50))
     end, {color = Color3.fromRGB(200, 50, 50)})
+
 end)
+
 
 -- ================================================================
 -- TAB: QUEST
@@ -1764,7 +2233,6 @@ tabQuest:Accordion("Debug", function(sec)
     end, {color = Color3.fromRGB(100, 110, 140)}, {locked = true})
 end, {locked = true})
 
--- Tambahin di atas (global / luar loop)
 lastSeasonSignature = ""
 
 spawn(function()
@@ -1774,14 +2242,12 @@ spawn(function()
         if ShowSeasonQuestEnabled then
             local tasks = GetSeasonTasks()
 
-            -- 🔥 buat signature (deteksi perubahan isi & urutan)
             local signature = ""
             for _, t in ipairs(tasks) do
                 signature = signature .. t.desc .. tostring(t.isDone) .. tostring(t.count)
             end
 
             if signature ~= lastSeasonSignature then
-                -- REBUILD UI
                 grp_season:Clear()
                 pnl_seasonSlots = {}
 
@@ -1799,7 +2265,6 @@ spawn(function()
 
                 lastSeasonSignature = signature
             else
-                -- UPDATE SAJA
                 for i, t in ipairs(tasks) do
                     local countTxt = t.isDone and "done" or t.count
                     local col = t.isDone and Color3.fromRGB(40, 210, 90) or Color3.fromRGB(80, 160, 255)
@@ -1818,7 +2283,6 @@ end)
 -- ================================================================
 local tabWebhook = win:Tab("Webhook")
 
--- ── Webhook Settings (URL + Test) ─────────────────────────────
 tabWebhook:Accordion("Webhook Settings", function(sec)
 
     sec:TextInput("Webhook URL", WebhookURL ~= "" and WebhookURL or "Paste URL disini...", function(v)
@@ -1840,7 +2304,7 @@ tabWebhook:Accordion("Webhook Settings", function(sec)
                 title       = "✅ Webhook Test",
                 description = "Webhook is working!",
                 color       = 0x57F287,
-                footer      = { text = "LuluXBee v0.2.0" },
+                footer      = { text = "LuluXBee v0.25" },
                 timestamp   = os.date("!%Y-%m-%dT%H:%M:%S")
             }}
         })
@@ -1853,7 +2317,6 @@ tabWebhook:Accordion("Webhook Settings", function(sec)
 
 end)
 
--- ── Buy Webhook (notif setiap auto buy seed berhasil) ─────────
 tabWebhook:Accordion("Buy Webhook", function(sec)
 
     sec:Label("Kirim notif ke Discord tiap auto buy seed berhasil.", {size = 11, color = Color3.fromRGB(160, 160, 200)})
@@ -1880,7 +2343,6 @@ tabWebhook:Accordion("Buy Webhook", function(sec)
 
 end)
 
--- ── Seed Webhook (kirim seed di tas setiap delay menit) ───────
 tabWebhook:Accordion("Seed Webhook", function(sec)
 
     sec:Label("Kirim data seed yang ada di tas setiap delay.", {size = 11, color = Color3.fromRGB(160, 160, 200)})
@@ -1919,7 +2381,6 @@ tabWebhook:Accordion("Seed Webhook", function(sec)
 
 end)
 
--- ── Status Webhook (kirim status script setiap delay menit) ───
 tabWebhook:Accordion("Status Webhook", function(sec)
 
     sec:Label("Kirim status semua fitur yang aktif setiap delay.", {size = 11, color = Color3.fromRGB(160, 160, 200)})
@@ -2143,6 +2604,6 @@ win:luluNotify("Anti-AFK Active", Color3.fromRGB(40, 180, 80))
 
 -- ================================================================
 print("========================================")
-print("LuluXBee v0.2.0 — LuluUI Edition Loaded!")
+print("LuluXBee v0.25 — LuluUI Edition Loaded!")
 print("========================================")
 PrintSeedMappings()
