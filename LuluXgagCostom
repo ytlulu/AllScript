@@ -1,1 +1,2894 @@
--- update to next time
+local LuluUI = loadstring(game:HttpGet(
+    "https://raw.githubusercontent.com/ytlulu/LULUVUI/main/BETATEST2", true
+))()
+
+-- ============================================================
+-- SERVICES
+-- ============================================================
+local SCRIPT_VERSION    = "vDev"
+local Players           = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local HttpService       = game:GetService("HttpService")
+local LP                = Players.LocalPlayer
+local Backpack          = LP.Backpack
+local Workspace         = game:GetService("Workspace")
+local Lighting          = game:GetService("Lighting")
+local MaterialService   = game:GetService("MaterialService")
+local VirtualUser       = game:GetService("VirtualUser")
+
+-- ============================================================
+-- CONFIG FILES
+-- ============================================================
+local WORKSPACE_PATH = "/storage/emulated/0/Android/data/com.roblox.client/files/gloop/external/Workspace/"
+local SETTINGS_PATH  = WORKSPACE_PATH .. "LuluXGAG_Settings.json"
+
+-- ============================================================
+-- CONFIG FILES – Folder per type
+-- ============================================================
+local BASE_PATH = WORKSPACE_PATH .. "PetsData/"
+
+local CONFIG_TYPES = {
+    "leveling lv 1",
+    "leveling lv 2",
+    "leveling kg 1",
+    "leveling kg 2",
+    "upgrading kg",
+    "custom loadout",
+}
+
+local function typeToFolder(configType)
+    return BASE_PATH .. configType:lower() .. "/"
+end
+
+local function ensureFolders()
+    pcall(function()
+        if type(makefolder) ~= "function" then return end
+        makefolder(WORKSPACE_PATH)
+        makefolder(BASE_PATH)
+        for _, t in ipairs(CONFIG_TYPES) do
+            makefolder(typeToFolder(t))
+        end
+    end)
+end
+
+local function saveNamedConfig(configType, name, uuids)
+    if name == "" then return false, "Name cannot be empty" end
+    if type(writefile) ~= "function" then return false, "writefile not available" end
+    local path = typeToFolder(configType) .. name .. ".json"
+    local ok, err = pcall(function()
+        writefile(path, HttpService:JSONEncode(uuids))
+    end)
+    return ok, (err or "")
+end
+
+local function deleteNamedConfig(configType, name)
+    if type(delfile) ~= "function" then return false, "delfile not available" end
+    local path = typeToFolder(configType) .. name .. ".json"
+    local ok, err = pcall(function() delfile(path) end)
+    return ok, (err or "")
+end
+
+local function getConfigsByType(configType)
+    local names = {}
+    pcall(function()
+        if type(listfiles) ~= "function" then return end
+        local folder = typeToFolder(configType)
+        for _, fullPath in ipairs(listfiles(folder)) do
+            local filename = fullPath:match("([^/\\]+)$") or fullPath
+            local name     = filename:match("^(.+)%.json$") or filename
+            table.insert(names, name)
+        end
+        table.sort(names)
+    end)
+    return names
+end
+
+local function getConfigUUIDs(configType, name)
+    local uuids = {}
+    pcall(function()
+        if type(readfile) ~= "function" then return end
+        local path = typeToFolder(configType) .. name .. ".json"
+        if type(isfile) == "function" and not isfile(path) then return end
+        local raw = readfile(path)
+        local ok, data = pcall(function() return HttpService:JSONDecode(raw) end)
+        if ok and type(data) == "table" then uuids = data end
+    end)
+    return uuids
+end
+
+local function getAllConfigEntries()
+    local entries = {}
+    pcall(function()
+        if type(listfiles) ~= "function" then return end
+        for _, t in ipairs(CONFIG_TYPES) do
+            local folder = typeToFolder(t)
+            for _, fullPath in ipairs(listfiles(folder)) do
+                local filename = fullPath:match("([^/\\]+)$") or fullPath
+                local name     = filename:match("^(.+)%.json$") or filename
+                table.insert(entries, t .. "/" .. name)
+            end
+        end
+        table.sort(entries)
+    end)
+    return entries
+end
+
+-- ============================================================
+-- REMOTES
+-- ============================================================
+local PetsService         = ReplicatedStorage.GameEvents.PetsService
+local PetCooldownsUpdated = ReplicatedStorage.GameEvents.PetCooldownsUpdated
+
+local function unequipPet(uuid) PetsService:FireServer("UnequipPet", uuid) end
+local function equipPet(uuid)   PetsService:FireServer("EquipPet",   uuid) end
+
+-- ============================================================
+-- HELPERS – NAME PARSE
+-- ============================================================
+local function parseName(itemName)
+    local kg  = itemName:match("%[(%d+%.%d+) KG%]")
+    local age = itemName:match("%[Age (%d+)%]")
+    local base = itemName:match("^(.-)%s*%[") or itemName
+    return { base = base:match("^%s*(.-)%s*$"), kg = kg, age = age }
+end
+
+local function buildDisplay(petName, kg, age)
+    local s = petName
+    if kg  then s = s .. " [" .. kg  .. " KG]"  end
+    if age then s = s .. " [Age " .. age .. "]" end
+    return s
+end
+
+-- ============================================================
+-- HELPERS – ACTIVE PET UI
+-- ============================================================
+local function getPetDisplay()
+    return LP.PlayerGui.ActivePetUI.Frame.Main.PetDisplay.ScrollingFrame
+end
+
+local function readPetAge(m)
+    if not m then return 0 end
+    local obj = m:FindFirstChild("PET_AGE")
+    if obj then
+        if obj:IsA("TextLabel") or obj:IsA("TextBox") then
+            return tonumber(obj.Text) or tonumber(obj.Text:match("%d+")) or 0
+        elseif obj:IsA("IntValue") or obj:IsA("NumberValue") then
+            return tonumber(obj.Value) or 0
+        elseif obj:IsA("Frame") then
+            for _, c in ipairs(obj:GetChildren()) do
+                if c:IsA("TextLabel") or c:IsA("TextBox") then
+                    local v = tonumber(c.Text) or tonumber(c.Text:match("%d+"))
+                    if v and v > 0 then return v end
+                end
+            end
+        end
+    end
+    local attr = m:GetAttribute("Age") or m:GetAttribute("PET_AGE")
+    if attr then return tonumber(attr) or 0 end
+    return 0
+end
+
+local function getActivePets()
+    local pets = {}
+    pcall(function()
+        for _, child in ipairs(getPetDisplay():GetChildren()) do
+            if child:IsA("Frame") and child:FindFirstChild("Main") then
+                local m = child.Main
+                table.insert(pets, {
+                    uuid = child.Name,
+                    name = m:FindFirstChild("PET_NAME") and m.PET_NAME.Text or "",
+                    type = m:FindFirstChild("PET_TYPE") and m.PET_TYPE.Text or "",
+                    age  = readPetAge(m),
+                })
+            end
+        end
+    end)
+    return pets
+end
+
+local function getAge(uuid)
+    local age = 0
+    pcall(function()
+        local frame = getPetDisplay():FindFirstChild(uuid)
+        if frame and frame:FindFirstChild("Main") then
+            age = readPetAge(frame.Main)
+        end
+    end)
+    return age
+end
+
+local function getPetType(uuid)
+    local t = ""
+    pcall(function()
+        local frame = getPetDisplay():FindFirstChild(uuid)
+        if frame and frame:FindFirstChild("Main") then
+            local pt = frame.Main:FindFirstChild("PET_TYPE")
+            if pt then t = pt.Text or "" end
+        end
+    end)
+    return t
+end
+
+-- ============================================================
+-- STATE
+-- ============================================================
+local State = {
+    AllPets           = {},
+    Alldisplay        = {},
+    EquippedUUIDs     = {},
+    BagUUIDs          = {},
+    UUIDToName        = {},
+    AllPetNames       = {},
+    DisplayToPet      = {},
+    UUIDToType        = {},
+    ShowInfo          = true,
+    DetailInfo        = true,
+    ShowProgress      = true,
+    ShowBlessing      = true,
+    ShowPnp           = true,
+    ShowAllProg       = true,
+    AllProgLastStatus = "",
+    DisplayKGTarget   = {},
+    DisplayLVTarget   = {},
+    OthersLoadoutUUIDs = {},
+    Disable3D         = false,   -- FIX 6: was Diisable3D
+}
+
+-- allKg
+local KG = {
+    Running      = false,
+    Thread       = nil,
+    Targets      = {},
+    Many         = 1,
+    Lv1          = {},
+    Lv2          = {},
+    UpKG         = {},
+    TargetBase   = 0,
+    Status       = {},
+    ActivePhases = {},
+    DoneUUIDs    = {},
+    ByStep       = false,
+    AllDone      = false,
+    CompletedNaturally = false,
+    LastKnown    = {},
+    LastKnownAge = {},
+    CurrentKG    = {},
+}
+
+-- all lv
+local LV = {
+    Running       = false,
+    Thread        = nil,
+    Targets       = {},
+    ManualTargets = {},
+    Many          = 1,
+    Lv1           = {},
+    Lv2           = {},
+    Status        = {},
+    DoneUUIDs     = {},
+    TargetAge     = 100,
+    AllDone       = false,
+    FromKG        = false,
+    WaitingForKG  = false,
+}
+
+-- all pnp
+local PnP = {
+    Running         = false,
+    CDConn          = nil,
+    DelayPick       = 3,
+    DelayPlace      = 0.3,
+    Sync            = false,
+    SyncPaused      = false,
+    Processing      = {},
+    Status          = {},
+    LabelOrder      = {},
+    LabelSet        = {},
+    OnSkillPets     = {},
+    OnSkillUUIDs    = {},
+    AfterSkillPets  = {},
+    AfterSkillUUIDs = {},
+    PrevCD          = {},
+    LastSeen        = {},
+}
+
+-- all boost
+local boost = {
+    Running    = false,
+    Thread     = nil,
+    Timers     = {},
+    ScanMap    = {},
+    Displays   = {},
+    Selected   = {},
+    ToyMode    = "Small",
+    SavedUUIDs = {},
+    Duration   = 60,
+    DelayMin   = 1,
+    TICK       = 1,
+}
+
+-- Webhook
+local Webhook = {
+    Url = "",
+    KG  = false,
+    LV  = false,
+}
+
+local ddBoostPets
+local ddOthersLoadout
+
+local Lag = {
+    Spider     = false,   -- FIX 8: kapital konsisten
+    Pets       = false,
+    Spotted    = false,
+    SpiderConn = nil,
+    PetsConn   = nil,
+    SpottedCon = nil,
+}
+
+-- REDUCE LAG
+local Terrain = Workspace:FindFirstChildOfClass("Terrain")
+
+-- =========================================================
+-- FUNCTION MID MODE
+-- =========================================================
+local function RedMid()
+    settings().Rendering.QualityLevel = Enum.QualityLevel.Level01
+    Lighting.GlobalShadows = false
+    Lighting.FogEnd = 100000
+    Lighting.Brightness = 1
+    Lighting.ClockTime = 14
+    for _, v in ipairs(Lighting:GetChildren()) do
+        if v:IsA("PostEffect") then v:Destroy() end
+    end
+    for _, v in ipairs(Lighting:GetChildren()) do
+        if v:IsA("Sky") then v:Destroy() end
+    end
+    local sky = Instance.new("Sky")
+    sky.Parent = Lighting
+    for _, v in ipairs(game:GetDescendants()) do
+        if v:IsA("ParticleEmitter") or v:IsA("Trail") or v:IsA("Beam")
+        or v:IsA("Explosion") or v:IsA("Fire") or v:IsA("Smoke") or v:IsA("Sparkles") then
+            v:Destroy()
+        end
+    end
+    for _, v in ipairs(Workspace:GetDescendants()) do
+        if v:IsA("BasePart") then
+            v.Material = Enum.Material.SmoothPlastic
+            v.Reflectance = 0
+        end
+    end
+    for _, v in ipairs(Workspace:GetDescendants()) do
+        if v:IsA("Decal") or v:IsA("Texture") then
+            v.Transparency = 0.5
+        end
+    end
+    for _, v in ipairs(MaterialService:GetChildren()) do v:Destroy() end
+    if Terrain then
+        Terrain.WaterWaveSize = 0
+        Terrain.WaterWaveSpeed = 0
+        Terrain.WaterReflectance = 0
+        Terrain.WaterTransparency = 1
+    end
+end
+
+-- =========================================================
+-- FUNCTION POWER MODE
+-- =========================================================
+local function pomid()
+    settings().Rendering.QualityLevel = Enum.QualityLevel.Level01
+    Lighting.GlobalShadows = false
+    Lighting.FogEnd = 100000
+    Lighting.FogColor = Color3.fromRGB(200,200,200)
+    Lighting.Brightness = 1
+    Lighting.ClockTime = 12
+    for _, v in ipairs(Lighting:GetChildren()) do
+        if v:IsA("PostEffect") or v:IsA("Sky") then v:Destroy() end
+    end
+    for _, v in ipairs(game:GetDescendants()) do
+        if v:IsA("ParticleEmitter") or v:IsA("Trail") or v:IsA("Beam")
+        or v:IsA("Explosion") or v:IsA("Fire") or v:IsA("Smoke")
+        or v:IsA("Sparkles") or v:IsA("Clouds") or v:IsA("Atmosphere") then
+            v:Destroy()
+        end
+    end
+    for _, v in ipairs(Workspace:GetDescendants()) do
+        if v:IsA("BasePart") then
+            v.Material = Enum.Material.SmoothPlastic
+            v.Reflectance = 0
+            v.Color = Color3.fromRGB(163,162,165)
+        end
+    end
+    for _, v in ipairs(Workspace:GetDescendants()) do
+        if v:IsA("Decal") or v:IsA("Texture") then v:Destroy() end
+    end
+    for _, v in ipairs(MaterialService:GetChildren()) do v:Destroy() end
+    if Terrain then
+        Terrain.WaterWaveSize = 0
+        Terrain.WaterWaveSpeed = 0
+        Terrain.WaterReflectance = 0
+        Terrain.WaterTransparency = 1
+    end
+end
+
+local function removeSpiderFolder(obj)
+    if obj.Name == "SpiderWebFX" and obj:IsA("Folder") then obj:Destroy() end
+end
+
+local function startSpiderRemover()
+    for _, v in ipairs(Workspace:GetDescendants()) do removeSpiderFolder(v) end
+    Lag.SpiderConn = Workspace.DescendantAdded:Connect(removeSpiderFolder)
+end
+
+local function stopSpiderRemover()
+    if Lag.SpiderConn then Lag.SpiderConn:Disconnect(); Lag.SpiderConn = nil end
+end
+
+local function clearPetsPhysical()
+    local folder = Workspace:FindFirstChild("PetsPhysical")
+    if folder then
+        for _, v in ipairs(folder:GetChildren()) do v:Destroy() end
+    end
+end
+
+local function startPetsRemover()
+    clearPetsPhysical()
+    Lag.PetsConn = Workspace.DescendantAdded:Connect(function(obj)
+        local folder = Workspace:FindFirstChild("PetsPhysical")
+        if folder and obj:IsDescendantOf(folder) then obj:Destroy() end
+    end)
+end
+
+local function stopPetsRemover()
+    if Lag.PetsConn then Lag.PetsConn:Disconnect(); Lag.PetsConn = nil end
+end
+
+local function removeSpotted(obj)
+    if obj.Name == "SpottedEffect" then obj:Destroy() end
+end
+
+local function startSpottedRemover()
+    for _, v in ipairs(workspace:GetDescendants()) do removeSpotted(v) end
+    Lag.SpottedCon = workspace.DescendantAdded:Connect(removeSpotted)
+end
+
+local function stopSpottedRemover()
+    if Lag.SpottedCon then Lag.SpottedCon:Disconnect(); Lag.SpottedCon = nil end
+end
+
+local function removeSneakPeek()
+    local ok, obj = pcall(function()
+        return workspace:WaitForChild("Interaction", 5)
+            :WaitForChild("UpdateItems", 5)
+            :WaitForChild("TrainingTeamEvent", 5)
+            :WaitForChild("SneakPeek", 5)
+    end)
+    if ok and obj then obj:Destroy(); return true end
+    return false
+end
+
+local function removeOtherGarden()
+    local player   = game:GetService("Players").LocalPlayer
+    local farmRoot = workspace:FindFirstChild("Farm")
+    if not farmRoot then return false end
+    local farm = farmRoot:FindFirstChild("Farm")
+    if not farm then return false end
+    local owner
+    pcall(function() owner = farm.Important.Data.Owner.Value end)
+    if not owner or owner ~= player.Name then
+        farm:Destroy(); return true
+    end
+    return false
+end
+
+-- egg bunny
+local char = LP.Character or LP.CharacterAdded:Wait()
+local hrp = char:WaitForChild("HumanoidRootPart")
+local eggConnection = nil
+
+local function tpToHitbox(hitbox)
+    if hitbox and hitbox:IsA("BasePart") then
+        hrp.AssemblyLinearVelocity = Vector3.zero
+        hrp.AssemblyAngularVelocity = Vector3.zero
+        local pos = hitbox.Position + Vector3.new(0, hitbox.Size.Y/2 + 4, 0)
+        hrp.CFrame = CFrame.new(pos)
+        hrp.Anchored = true
+        task.wait(0.15)
+        hrp.Anchored = false
+    end
+end
+
+local function startEggTP()
+    local folder = Workspace:FindFirstChild("EasterEggReward")
+    if folder then
+        for _, v in ipairs(folder:GetChildren()) do
+            if v.Name == "HitBox" and v:IsA("BasePart") then tpToHitbox(v) end
+        end
+    end
+    eggConnection = Workspace.DescendantAdded:Connect(function(obj)
+        if obj.Name == "HitBox" and obj:IsA("BasePart")
+        and obj.Parent and obj.Parent.Name == "EasterEggReward" then
+            task.wait(0.5)
+            tpToHitbox(obj)
+        end
+    end)
+end
+
+local function stopEggTP()
+    if eggConnection then eggConnection:Disconnect(); eggConnection = nil end
+end
+
+LP.CharacterAdded:Connect(function(c)
+    char = c
+    hrp = c:WaitForChild("HumanoidRootPart")
+end)
+
+-- Kalkulator
+local KALC_MULT     = 0.090909
+local kalcAge       = 1
+local kalcWeight    = 1
+local kalcShowRange = false
+
+-- ============================================================
+-- FIX 1: DROPDOWN PROXIES – ddKG sebagai tabel, bukan dotted local
+-- ============================================================
+local ddKG = {}          -- ddKG.Lv1, ddKG.Lv2, ddKG.UpKg
+local ddKGTarget
+local ddLVTarget, ddLVLv1, ddLVLv2
+local ddPnPOnSkill, ddPnPAfterSkill
+local ddSaveConfigSelect, ddDeleteConfig, inpConfigName, inpWebhookUrl
+local tglKGStart, tglLVStart
+
+-- ============================================================
+-- SETTINGS SAVE / LOAD
+-- ============================================================
+local function getBoostSelectedUUIDs()
+    local uuids = {}
+    for _, disp in ipairs(boost.Selected) do
+        local uuid = boost.ScanMap[disp]
+        if uuid then table.insert(uuids, uuid) end
+    end
+    return uuids
+end
+
+-- FIX 2: table constructor pakai flat keys (tidak boleh dotted)
+local function saveSettings()
+    if type(writefile) ~= "function" then return false, "writefile not available" end
+    local s = {
+        KGMany        = KG.Many,
+        KGTargetBase  = KG.TargetBase,
+        KGByStep      = KG.ByStep,
+        ShowInfo      = State.ShowInfo,
+        DetailInfo    = State.DetailInfo,
+        ShowProgress  = State.ShowProgress,
+        ShowBlessing  = State.ShowBlessing,
+        ShowPnp       = State.ShowPnp,
+        ShowAllProg   = State.ShowAllProg,
+        LVMany        = LV.Many,
+        LVTargetAge   = LV.TargetAge,
+        LVFromKG      = LV.FromKG,
+        PnPDelayPick  = PnP.DelayPick,
+        PnPDelayPlace = PnP.DelayPlace,
+        PnPSync       = PnP.Sync,
+        WebhookUrl    = Webhook.Url,
+        WebhookKG     = Webhook.KG,
+        WebhookLV     = Webhook.LV,
+        boostSelectedUUIDs = getBoostSelectedUUIDs(),
+        boostToyMode  = boost.ToyMode,
+        boostDelayMin = boost.DelayMin,
+        Disable3D     = State.Disable3D,
+        LagSpider     = Lag.Spider,
+        LagPets       = Lag.Pets,
+        LagSpotted    = Lag.Spotted,
+    }
+    local ok, err = pcall(function()
+        writefile(SETTINGS_PATH, HttpService:JSONEncode(s))
+    end)
+    return ok, (err or "")
+end
+
+-- FIX 3: loadSettings pakai flat keys yang cocok dengan saveSettings
+local function loadSettings()
+    pcall(function()
+        if type(isfile) ~= "function" or not isfile(SETTINGS_PATH) then return end
+        local raw = readfile(SETTINGS_PATH)
+        local ok, s = pcall(function() return HttpService:JSONDecode(raw) end)
+        if not ok or not s then return end
+
+        if s.KGMany       then KG.Many        = s.KGMany       end
+        if s.KGTargetBase then KG.TargetBase  = s.KGTargetBase end
+        if s.KGByStep    ~= nil then KG.ByStep     = s.KGByStep    end
+        if s.ShowInfo    ~= nil then State.ShowInfo     = s.ShowInfo     end
+        if s.DetailInfo  ~= nil then State.DetailInfo   = s.DetailInfo   end
+        if s.ShowProgress ~= nil then State.ShowProgress = s.ShowProgress end
+        if s.ShowBlessing ~= nil then State.ShowBlessing = s.ShowBlessing end
+        if s.ShowPnp     ~= nil then State.ShowPnp      = s.ShowPnp      end
+        if s.ShowAllProg ~= nil then State.ShowAllProg  = s.ShowAllProg  end
+        if s.LVMany       then LV.Many        = s.LVMany       end
+        if s.LVTargetAge  then LV.TargetAge   = s.LVTargetAge  end
+        if s.LVFromKG    ~= nil then LV.FromKG     = s.LVFromKG    end
+        if s.PnPDelayPick  then PnP.DelayPick  = s.PnPDelayPick  end
+        if s.PnPDelayPlace then PnP.DelayPlace = s.PnPDelayPlace end
+        if s.PnPSync     ~= nil then PnP.Sync      = s.PnPSync     end
+        if s.WebhookUrl   then Webhook.Url    = s.WebhookUrl   end
+        if s.WebhookKG   ~= nil then Webhook.KG    = s.WebhookKG   end
+        if s.WebhookLV   ~= nil then Webhook.LV    = s.WebhookLV   end
+        if s.boostSelectedUUIDs and type(s.boostSelectedUUIDs) == "table" then
+            boost.SavedUUIDs = s.boostSelectedUUIDs
+        end
+        if s.boostToyMode  then boost.ToyMode  = s.boostToyMode  end
+        if s.boostDelayMin then
+            boost.DelayMin = s.boostDelayMin
+            boost.Duration = s.boostDelayMin * 60
+        end
+        if s.Disable3D  ~= nil then State.Disable3D = s.Disable3D  end
+        if s.LagSpider  ~= nil then Lag.Spider      = s.LagSpider  end
+        if s.LagPets    ~= nil then Lag.Pets        = s.LagPets    end
+        if s.LagSpotted ~= nil then Lag.Spotted     = s.LagSpotted end
+    end)
+end
+
+-- ============================================================
+-- WEBHOOK
+-- ============================================================
+local function sendWebhook(content)
+    if Webhook.Url == "" then return end
+    pcall(function()
+        local body = HttpService:JSONEncode({ content = content })
+        if syn and syn.request then
+            syn.request({ Url = Webhook.Url, Method = "POST", Headers = { ["Content-Type"] = "application/json" }, Body = body })
+        elseif http and http.request then
+            http.request({ Url = Webhook.Url, Method = "POST", Headers = { ["Content-Type"] = "application/json" }, Body = body })
+        elseif request then
+            request({ Url = Webhook.Url, Method = "POST", Headers = { ["Content-Type"] = "application/json" }, Body = body })
+        end
+    end)
+end
+
+local function sendWebhookEmbed(embedData)
+    if Webhook.Url == "" then return end
+    pcall(function()
+        local payload = {
+            username   = "LuluXGAG",
+            avatar_url = "https://i.imgur.com/mwf869e.jpeg",
+            embeds     = { embedData },
+        }
+        local body = HttpService:JSONEncode(payload)
+        local reqFn = (syn and syn.request) or (http and http.request) or request
+        if not reqFn then return end
+        reqFn({ Url = Webhook.Url, Method = "POST", Headers = { ["Content-Type"] = "application/json" }, Body = body })
+    end)
+end
+
+-- ============================================================
+-- BOOST HELPERS
+-- ============================================================
+local function findBoostTool(toyType)
+    for _, item in ipairs(Backpack:GetChildren()) do
+        if item:IsA("Tool")
+            and string.find(item.Name, toyType .. " Pet Toy")
+            and string.find(item.Name, "Passive Boost") then
+            return item
+        end
+    end
+    return nil
+end
+
+local function applyOneToy(uuid, toyType)
+    local tool = findBoostTool(toyType)
+    if not tool then return false end
+    local char = LP.Character
+    if not char then return false end
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if not hum then return false end
+    pcall(function()
+        hum:EquipTool(tool)
+        task.wait(0.3)
+        ReplicatedStorage.GameEvents.PetBoostService:FireServer("ApplyBoost", uuid)
+        task.wait(0.3)
+        hum:UnequipTools()
+        task.wait(0.3)
+    end)
+    return true
+end
+
+local function applyBoostDirect(uuid)
+    local useSmall  = (boost.ToyMode == "Small"  or boost.ToyMode == "Both")
+    local useMedium = (boost.ToyMode == "Medium" or boost.ToyMode == "Both")
+    if useSmall  and findBoostTool("Small")  then applyOneToy(uuid, "Small")  end
+    if useMedium and findBoostTool("Medium") then applyOneToy(uuid, "Medium") end
+end
+
+local function doScanBoostPets()
+    boost.ScanMap  = {}
+    boost.Displays = {}
+    pcall(function()
+        local seen = {}
+        local i    = 0
+        for _, child in ipairs(getPetDisplay():GetChildren()) do
+            if child:IsA("Frame") and child:FindFirstChild("Main") then
+                i = i + 1
+                local m       = child.Main
+                local petName = m:FindFirstChild("PET_NAME") and m.PET_NAME.Text or ""
+                local petType = m:FindFirstChild("PET_TYPE") and m.PET_TYPE.Text or ""
+                local base
+                if petName ~= "" and petType ~= "" then
+                    base = petName .. " [" .. petType .. "]"
+                elseif petName ~= "" then
+                    base = petName
+                elseif petType ~= "" then
+                    base = petType
+                else
+                    base = "Pet #" .. i
+                end
+                local key = base
+                local n   = 2
+                while seen[key] do key = base .. " (" .. n .. ")"; n = n + 1 end
+                seen[key]          = true
+                boost.ScanMap[key] = child.Name
+                table.insert(boost.Displays, key)
+            end
+        end
+    end)
+    return #boost.Displays
+end
+
+local function startBoostLoop()
+    boost.Thread = task.spawn(function()
+        while boost.Running do
+            task.wait(boost.TICK)
+            if not boost.Running then break end
+
+            local useSmall  = (boost.ToyMode == "Small"  or boost.ToyMode == "Both")
+            local useMedium = (boost.ToyMode == "Medium" or boost.ToyMode == "Both")
+
+            for uuid, timers in pairs(boost.Timers) do
+                if not boost.Running then break end
+
+                if useSmall then
+                    timers.st = timers.st - boost.TICK
+                    if timers.st <= 0 then
+                        if findBoostTool("Small") then
+                            timers.st = boost.Duration
+                            pcall(function() applyOneToy(uuid, "Small") end)
+                        else
+                            timers.st = 0
+                        end
+                    end
+                end
+
+                if useMedium then
+                    timers.mt = timers.mt - boost.TICK
+                    if timers.mt <= 0 then
+                        if findBoostTool("Medium") then
+                            timers.mt = boost.Duration
+                            pcall(function() applyOneToy(uuid, "Medium") end)
+                        else
+                            timers.mt = 0
+                        end
+                    end
+                end
+            end
+        end
+        boost.Thread = nil
+    end)
+end
+
+-- ============================================================
+-- WEBHOOK NOTIF HELPERS
+-- ============================================================
+local function notifyPetKGUpdate(petName, prevKG, newKG)
+    if not Webhook.KG then return end
+    if newKG <= prevKG then return end
+    local desc = "**" .. (petName or "Unknown") .. "**\n"
+               .. string.format("%.2f KG", prevKG) .. "  →  **" .. string.format("%.2f KG", newKG) .. "**"
+    if KG.TargetBase > 0 then
+        local pct = math.min(newKG / KG.TargetBase * 100, 100)
+        desc = desc .. string.format("\nTarget: `%.2f KG` (%.1f%%)", KG.TargetBase, pct)
+    end
+    sendWebhookEmbed({
+        title       = "BASE KG Updated",
+        description = desc,
+        color       = 0x3498DB,
+        footer      = { text = "LuluXGAG " .. SCRIPT_VERSION },
+        timestamp   = os.date("!%Y-%m-%dT%H:%M:%S"),
+    })
+end
+
+local function notifyPetKGDone(petName, finalKG)
+    if not Webhook.KG then return end
+    local doneCount = 0
+    for _ in pairs(KG.DoneUUIDs) do doneCount = doneCount + 1 end
+    local kgStr = finalKG and string.format("%.2f KG", finalKG) or "?"
+    local desc  = "**" .. (petName or "Unknown") .. "**\n"
+               .. "Base KG Reached: `" .. kgStr .. "`"
+    if KG.TargetBase > 0 then
+        desc = desc .. "\nTarget: `" .. string.format("%.2f KG", KG.TargetBase) .. "`"
+    end
+    sendWebhookEmbed({
+        title       = " Pet KG Done",
+        description = desc,
+        color       = 0x57F287,
+        footer      = { text = "Done: " .. doneCount .. "/" .. #KG.Targets .. " pets | LuluXGAG " .. SCRIPT_VERSION },
+        timestamp   = os.date("!%Y-%m-%dT%H:%M:%S"),
+    })
+end
+
+local function notifyPetKGLevelingSwitch(petName, phase, petIndex, totalQueue)
+    if not Webhook.KG then return end
+    local phaseStr = phase == "lv2" and "Leveling **Lv2**" or "Leveling **Lv1**"
+    local desc = "**" .. (petName or "?") .. "** Star " .. phaseStr
+    if petIndex and totalQueue then
+        desc = desc .. "\nPet to: `" .. petIndex .. "/" .. totalQueue .. "`"
+    end
+    sendWebhookEmbed({
+        title       = "KG: Pets Started Leveling",
+        description = desc,
+        color       = 0x9B59B6,
+        footer      = { text = "LuluXGAG " .. SCRIPT_VERSION },
+        timestamp   = os.date("!%Y-%m-%dT%H:%M:%S"),
+    })
+end
+
+local function notifyPetLVPhase(petName, fromAge, toPhase)
+    if not Webhook.LV then return end
+    local desc = "**" .. (petName or "Unknown") .. "**\n"
+               .. "Age: `" .. fromAge .. "`  Phase: **" .. toPhase .. "**"
+    sendWebhookEmbed({
+        title       = "LV Phase Changed",
+        description = desc,
+        color       = 0xF1C40F,
+        footer      = { text = "LuluXGAG " .. SCRIPT_VERSION },
+        timestamp   = os.date("!%Y-%m-%dT%H:%M:%S"),
+    })
+end
+
+local function notifyPetLVDone(petName, finalAge, doneCount, totalCount)
+    if not Webhook.LV then return end
+    local desc = "**" .. (petName or "Unknown") .. "**\n"
+               .. "Final Age: `" .. finalAge .. "` | Target: `" .. LV.TargetAge .. "`"
+    sendWebhookEmbed({
+        title       = "Pet Leveling Done",
+        description = desc,
+        color       = 0x57F287,
+        footer      = { text = "Done: " .. doneCount .. "|" .. totalCount .. " pets | LuluXGAG " .. SCRIPT_VERSION },
+        timestamp   = os.date("!%Y-%m-%dT%H:%M:%S"),
+    })
+end
+
+local function notifyAllLVDone()
+    if not Webhook.LV then return end
+    local total = #LV.Targets
+    local desc  = "Semua **" .. total .. " pets** succes leveling!\n"
+               .. "Target Age: `" .. LV.TargetAge .. "`"
+    sendWebhookEmbed({
+        title       = "All Leveling Done",
+        description = desc,
+        color       = 0xE91E63,
+        footer      = { text = "all: " .. total .. " pets | LuluXGAG " .. SCRIPT_VERSION },
+        timestamp   = os.date("!%Y-%m-%dT%H:%M:%S"),
+    })
+end
+
+local function notifyKGStarted(targets, targetKG)
+    if not Webhook.KG then return end
+    local lines = {}
+    for i, dn in ipairs(targets) do
+        lines[#lines+1] = "`" .. i .. ".` " .. dn
+    end
+    local desc = "**" .. #targets .. " pets** mulai Up KG"
+    if targetKG and targetKG > 0 then
+        desc = desc .. " | Target: `" .. string.format("%.2f KG", targetKG) .. "`"
+    end
+    desc = desc .. "\n\n" .. table.concat(lines, "\n")
+    sendWebhookEmbed({
+        title       = "⚙️ Auto KG Started",
+        description = desc,
+        color       = 0x3498DB,
+        footer      = { text = "LuluXGAG " .. SCRIPT_VERSION },
+        timestamp   = os.date("!%Y-%m-%dT%H:%M:%S"),
+    })
+end
+
+local function notifyLVStarted(targets, targetAge)
+    if not Webhook.LV then return end
+    local lines = {}
+    for i, dn in ipairs(targets) do
+        lines[#lines+1] = "`" .. i .. ".` " .. dn
+    end
+    local desc = "**" .. #targets .. " pets** mulai Leveling"
+    if targetAge then
+        desc = desc .. " | Target Age: `" .. targetAge .. "`"
+    end
+    desc = desc .. "\n\n" .. table.concat(lines, "\n")
+    sendWebhookEmbed({
+        title       = "⚡ Auto LV Started",
+        description = desc,
+        color       = 0xF1C40F,
+        footer      = { text = "LuluXGAG " .. SCRIPT_VERSION },
+        timestamp   = os.date("!%Y-%m-%dT%H:%M:%S"),
+    })
+end
+
+-- ============================================================
+-- REBUILD LV FROM KG LIST
+-- ============================================================
+local function rebuildLVFromKGList(useKGDone)
+    if ddLVTarget then
+        local _saved = LV.ManualTargets
+        ddLVTarget:SetOptions(State.Alldisplay)
+        LV.ManualTargets = _saved
+    end
+end
+
+-- ============================================================
+-- JUMBO BLESSING TRACKER
+-- ============================================================
+local jumboBlessings      = {}
+local jumboFiredPerHelper = {}
+local jumboLabelOrder     = {}
+local jumboLabelSet       = {}
+local jumboLastSeen       = {}
+
+-- ============================================================
+-- PetCooldownsUpdated – Jumbo Blessing + PnP
+-- ============================================================
+if PnP.CDConn then pcall(function() PnP.CDConn:Disconnect() end) end
+PnP.CDConn = PetCooldownsUpdated.OnClientEvent:Connect(function(uuid, data)
+    uuid = uuid or "unknown"
+    local foundJumbo = false
+
+    for _, skill in ipairs(data) do
+        if skill.Passive == "Jumbo Blessing" then
+            local prev = jumboBlessings[uuid] and jumboBlessings[uuid].time
+            local cur  = tonumber(skill.Time) or 0
+            if prev ~= nil and cur > prev then jumboFiredPerHelper[uuid] = true end
+            if not jumboLabelSet[uuid] then
+                jumboLabelSet[uuid] = true
+                table.insert(jumboLabelOrder, uuid)
+            end
+            jumboBlessings[uuid] = { time = cur }
+            jumboLastSeen[uuid]  = tick()   -- FIX 4: was boost.TICK()
+            foundJumbo = true
+        end
+    end
+
+    -- PnP On Skill
+    if PnP.Running and PnP.OnSkillUUIDs[uuid] then
+        local firstSkill = data and data[1]
+        if firstSkill then
+            local cd = tonumber(firstSkill.Time) or 0
+            PnP.Status[uuid]   = { skill = firstSkill.Passive, cd = cd }
+            PnP.LastSeen[uuid] = tick()   -- FIX 4
+            if not PnP.LabelSet[uuid] then
+                PnP.LabelSet[uuid] = true
+                table.insert(PnP.LabelOrder, uuid)
+            end
+            if cd == 0 and not PnP.Processing[uuid] then
+                if PnP.Sync and (
+                    KG.Status[uuid] == "progres" or KG.ActivePhases[uuid] ~= nil or
+                    LV.Status[uuid] == "progres"
+                ) then
+                else
+                    PnP.Processing[uuid] = true
+                    task.spawn(function()
+                        local function cleanup() PnP.Processing[uuid] = nil end
+                        local syncBudget = 10
+                        if PnP.Sync then
+                            while PnP.SyncPaused and syncBudget > 0 do
+                                task.wait(0.5); syncBudget = syncBudget - 0.5
+                            end
+                        end
+                        if not PnP.Running then cleanup(); return end
+                        local ok, frame = pcall(function() return getPetDisplay():FindFirstChild(uuid) end)
+                        if not ok or not frame then cleanup(); return end
+                        task.wait(PnP.DelayPick)
+                        if not PnP.Running or not PnP.OnSkillUUIDs[uuid] then cleanup(); return end
+                        if PnP.Sync then
+                            while PnP.SyncPaused and syncBudget > 0 do
+                                task.wait(0.5); syncBudget = syncBudget - 0.5
+                            end
+                        end
+                        if not PnP.Running or not PnP.OnSkillUUIDs[uuid] then cleanup(); return end
+                        pcall(function() unequipPet(uuid) end)
+                        task.wait(PnP.DelayPlace)
+                        pcall(function() equipPet(uuid) end)
+                        cleanup()
+                    end)
+                end
+            end
+        end
+    end
+
+    -- PnP After Skill
+    if PnP.Running and PnP.AfterSkillUUIDs[uuid] then
+        local firstSkill = data and data[1]
+        if firstSkill then
+            local cd     = tonumber(firstSkill.Time) or 0
+            local prevCD = PnP.PrevCD[uuid]
+            PnP.PrevCD[uuid]   = cd
+            PnP.Status[uuid]   = { skill = firstSkill.Passive, cd = cd }
+            PnP.LastSeen[uuid] = tick()   -- FIX 4
+            if not PnP.LabelSet[uuid] then
+                PnP.LabelSet[uuid] = true
+                table.insert(PnP.LabelOrder, uuid)
+            end
+            if (prevCD or 0) == 0 and cd > 0 and not PnP.Processing[uuid] then
+                if PnP.Sync and (
+                    KG.Status[uuid] == "progres" or KG.ActivePhases[uuid] ~= nil or
+                    LV.Status[uuid] == "progres"
+                ) then
+                else
+                    PnP.Processing[uuid] = true
+                    task.spawn(function()
+                        local function cleanup() PnP.Processing[uuid] = nil end
+                        local syncBudget = 10
+                        if PnP.Sync then
+                            while PnP.SyncPaused and syncBudget > 0 do
+                                task.wait(0.5); syncBudget = syncBudget - 0.5
+                            end
+                        end
+                        if not PnP.Running then cleanup(); return end
+                        local ok, frame = pcall(function() return getPetDisplay():FindFirstChild(uuid) end)
+                        if not ok or not frame then cleanup(); return end
+                        task.wait(PnP.DelayPick)
+                        if not PnP.Running or not PnP.AfterSkillUUIDs[uuid] then cleanup(); return end
+                        if PnP.Sync then
+                            while PnP.SyncPaused and syncBudget > 0 do
+                                task.wait(0.5); syncBudget = syncBudget - 0.5
+                            end
+                        end
+                        if not PnP.Running or not PnP.AfterSkillUUIDs[uuid] then cleanup(); return end
+                        pcall(function() unequipPet(uuid) end)
+                        task.wait(PnP.DelayPlace)
+                        pcall(function() equipPet(uuid) end)
+                        cleanup()
+                    end)
+                end
+            end
+        end
+    end
+
+    if not foundJumbo then
+        if jumboBlessings[uuid] then
+            for i, u in ipairs(jumboLabelOrder) do
+                if u == uuid then table.remove(jumboLabelOrder, i); break end
+            end
+        end
+        jumboBlessings[uuid]      = nil
+        jumboFiredPerHelper[uuid] = nil
+        jumboLabelSet[uuid]       = nil
+    end
+end)
+
+-- ============================================================
+-- UNEQUIP ALL ACTIVE
+-- ============================================================
+local function unequipAllActive()
+    PnP.SyncPaused = true
+    pcall(function()
+        local uuids = {}
+        for _, child in ipairs(getPetDisplay():GetChildren()) do
+            if child:IsA("Frame") and child:FindFirstChild("Main") then
+                table.insert(uuids, child.Name)
+            end
+        end
+        for _, uuid in ipairs(uuids) do
+            pcall(function() unequipPet(uuid) end)
+            task.wait(0.25)
+        end
+    end)
+    task.wait(0.3)
+    PnP.SyncPaused = false
+end
+
+-- ============================================================
+-- PLAYER VERIFICATION
+-- ============================================================
+local function isOwnedByLP(item)
+    local owner = item:GetAttribute("Owner") or item:GetAttribute("PlayerName")
+    if owner == nil then return true end
+    return owner == LP.Name or owner == tostring(LP.UserId)
+end
+
+-- ============================================================
+-- HELPER – RESCAN KG dari Backpack
+-- ============================================================
+local function getCurrentKG(uuid)
+    local kg = 0
+    for _, item in ipairs(Backpack:GetChildren()) do
+        pcall(function()
+            if not isOwnedByLP(item) then return end
+            local u = item:GetAttribute("PET_UUID") or item.Name
+            if u == uuid then
+                local parsed = parseName(item.Name)
+                if parsed.kg then
+                    kg = tonumber(parsed.kg) or 0
+                    KG.LastKnown[uuid] = kg
+                end
+            end
+        end)
+    end
+    return kg
+end
+
+local function rescanPetTarget(uuid)
+    local result = { age = 0, kg = 0 }
+    for _, item in ipairs(Backpack:GetChildren()) do
+        pcall(function()
+            if not isOwnedByLP(item) then return end
+            local u = item:GetAttribute("PET_UUID") or item.Name
+            if u == uuid then
+                local parsed = parseName(item.Name)
+                result.kg  = tonumber(parsed.kg)  or 0
+                result.age = tonumber(parsed.age) or 0
+                KG.LastKnown[uuid] = result.kg
+            end
+        end)
+    end
+    return result
+end
+
+-- ============================================================
+-- SCAN
+-- ============================================================
+local function scanAll()
+    State.AllPets       = {}
+    State.Alldisplay    = {}
+    State.EquippedUUIDs = {}
+    State.BagUUIDs      = {}
+
+    for _, item in ipairs(Backpack:GetChildren()) do
+        pcall(function()
+            if not isOwnedByLP(item) then return end
+            if item:GetAttribute("PetType") == "Pet" then
+                local uuid    = item:GetAttribute("PET_UUID") or item.Name
+                local petName = item:GetAttribute("f") or ""
+                local parsed  = parseName(item.Name)
+                State.BagUUIDs[uuid] = true
+                if parsed.kg then KG.LastKnown[uuid] = tonumber(parsed.kg) or 0 end
+                table.insert(State.AllPets, {
+                    uuid     = uuid,
+                    name     = petName,
+                    kg       = parsed.kg,
+                    age      = parsed.age,
+                    display  = buildDisplay(petName, parsed.kg, parsed.age),
+                    equipped = false,
+                })
+            end
+        end)
+    end
+
+    local uuidIndex = {}
+    for i, p in ipairs(State.AllPets) do uuidIndex[p.uuid] = i end
+
+    pcall(function()
+        for _, child in ipairs(getPetDisplay():GetChildren()) do
+            if child:IsA("Frame") and child:FindFirstChild("Main") then
+                local m    = child.Main
+                local uuid = child.Name
+                State.EquippedUUIDs[uuid] = true
+                local petName = m:FindFirstChild("PET_NAME") and m.PET_NAME.Text or ""
+                local petAge  = readPetAge(m)
+                local petType = m:FindFirstChild("PET_TYPE") and m.PET_TYPE.Text or ""
+                local disp    = petName
+                              .. (petAge > 0 and (" [Age " .. petAge .. "]") or "")
+                              .. " [★]"
+                local existingIdx = uuidIndex[uuid]
+                if existingIdx then
+                    State.AllPets[existingIdx] = {
+                        uuid     = uuid,
+                        name     = petName,
+                        petType  = petType,
+                        kg       = nil,
+                        age      = tostring(petAge),
+                        display  = disp,
+                        equipped = true,
+                    }
+                else
+                    table.insert(State.AllPets, {
+                        uuid     = uuid,
+                        name     = petName,
+                        petType  = petType,
+                        kg       = nil,
+                        age      = tostring(petAge),
+                        display  = disp,
+                        equipped = true,
+                    })
+                    uuidIndex[uuid] = #State.AllPets
+                end
+            end
+        end
+    end)
+
+    table.sort(State.AllPets, function(a, b) return a.name:lower() < b.name:lower() end)
+    for _, p in ipairs(State.AllPets) do table.insert(State.Alldisplay, p.display) end
+
+    State.UUIDToName  = {}
+    State.AllPetNames = {}
+    local nameSet = {}
+    for _, p in ipairs(State.AllPets) do
+        State.UUIDToName[p.uuid] = p.name
+        if p.name ~= "" and not nameSet[p.name] then
+            nameSet[p.name] = true
+            table.insert(State.AllPetNames, p.name)
+        end
+    end
+    table.sort(State.AllPetNames)
+
+    State.DisplayToPet = {}
+    State.UUIDToType   = {}
+    for _, p in ipairs(State.AllPets) do
+        State.DisplayToPet[p.display] = p
+        if p.petType and p.petType ~= "" then
+            State.UUIDToType[p.uuid] = p.petType
+        end
+    end
+end
+
+local function rebuildPnPUUIDs()
+    PnP.OnSkillUUIDs = {}
+    local onSet = {}
+    for _, n in ipairs(PnP.OnSkillPets) do onSet[n] = true end
+    for _, p in ipairs(State.AllPets) do
+        if onSet[p.name] then PnP.OnSkillUUIDs[p.uuid] = true end
+    end
+    PnP.AfterSkillUUIDs = {}
+    local aftSet = {}
+    for _, n in ipairs(PnP.AfterSkillPets) do aftSet[n] = true end
+    for _, p in ipairs(State.AllPets) do
+        if aftSet[p.name] then PnP.AfterSkillUUIDs[p.uuid] = true end
+    end
+end
+
+local function rebuildConfigDropdowns()
+    if ddKG.Lv1        then ddKG.Lv1:SetOptions(getConfigsByType("leveling kg 1"))        end
+    if ddKG.Lv2        then ddKG.Lv2:SetOptions(getConfigsByType("leveling kg 2"))        end
+    if ddKG.UpKg       then ddKG.UpKg:SetOptions(getConfigsByType("upgrading kg"))        end
+    if ddLVLv1         then ddLVLv1:SetOptions(getConfigsByType("leveling lv 1"))         end
+    if ddLVLv2         then ddLVLv2:SetOptions(getConfigsByType("leveling lv 2"))         end
+    if ddDeleteConfig  then ddDeleteConfig:SetOptions(getAllConfigEntries())               end
+    if ddOthersLoadout then ddOthersLoadout:SetOptions(getConfigsByType("custom loadout")) end
+end
+
+local function refreshTargets()
+    scanAll()
+    State.DisplayKGTarget = {}
+    State.DisplayLVTarget = {}
+    for _, p in ipairs(State.AllPets) do
+        table.insert(State.DisplayKGTarget, p.display)
+        table.insert(State.DisplayLVTarget, p.display)
+    end
+    local _savedKG = KG.Targets
+    local _savedLV = LV.ManualTargets
+    if ddKGTarget then ddKGTarget:SetOptions(State.DisplayKGTarget) end
+    if ddLVTarget then ddLVTarget:SetOptions(State.Alldisplay)      end
+    KG.Targets       = _savedKG
+    LV.ManualTargets = _savedLV
+end
+
+local function refreshAll()
+    scanAll()
+    State.DisplayKGTarget = {}
+    State.DisplayLVTarget = {}
+    for _, p in ipairs(State.AllPets) do
+        table.insert(State.DisplayKGTarget, p.display)
+        table.insert(State.DisplayLVTarget, p.display)
+    end
+    local _savedKG = KG.Targets
+    local _savedLV = LV.ManualTargets
+    if ddKGTarget      then ddKGTarget:SetOptions(State.DisplayKGTarget) end
+    if ddLVTarget      then ddLVTarget:SetOptions(State.Alldisplay)      end
+    KG.Targets       = _savedKG
+    LV.ManualTargets = _savedLV
+    if ddPnPOnSkill    then ddPnPOnSkill:SetOptions(State.AllPetNames)    end
+    if ddPnPAfterSkill then ddPnPAfterSkill:SetOptions(State.AllPetNames) end
+    rebuildPnPUUIDs()
+
+    if #boost.SavedUUIDs > 0 then
+        doScanBoostPets()
+        if ddBoostPets then ddBoostPets:SetOptions(boost.Displays) end
+        local uuidToDisp = {}
+        for disp, uuid in pairs(boost.ScanMap) do uuidToDisp[uuid] = disp end
+        local restoredSel = {}
+        for _, savedUUID in ipairs(boost.SavedUUIDs) do
+            local disp = uuidToDisp[savedUUID]
+            if disp then table.insert(restoredSel, disp) end
+        end
+        if #restoredSel > 0 then
+            boost.Selected = restoredSel
+            pcall(function()
+                if ddBoostPets then ddBoostPets:SetSelected(restoredSel) end
+            end)
+        end
+    end
+
+    rebuildConfigDropdowns()
+end
+
+local function uuidOf(displayName)
+    local p = State.DisplayToPet[displayName]
+    return p and p.uuid or nil
+end
+
+local function petOf(displayName)
+    return State.DisplayToPet[displayName]
+end
+
+local function rescanTargetsOnly()
+    pcall(function()
+        for _, child in ipairs(getPetDisplay():GetChildren()) do
+            if child:IsA("Frame") and child:FindFirstChild("Main") then
+                State.EquippedUUIDs[child.Name] = true
+            end
+        end
+        for _, dn in ipairs(KG.Targets) do
+            local p = petOf(dn)
+            if p and KG.Status[p.uuid] ~= "done" then
+                pcall(function() rescanPetTarget(p.uuid) end)
+            end
+        end
+    end)
+end
+
+local function rebuildKGTargetDisplay()
+    State.DisplayKGTarget = {}
+    for _, p in ipairs(State.AllPets) do table.insert(State.DisplayKGTarget, p.display) end
+    if ddKGTarget then
+        local _saved = KG.Targets
+        ddKGTarget:SetOptions(State.DisplayKGTarget)
+        KG.Targets = _saved
+    end
+end
+
+local function rebuildLVTargetDisplay()
+    State.DisplayLVTarget = {}
+    for _, p in ipairs(State.AllPets) do table.insert(State.DisplayLVTarget, p.display) end
+    if ddLVTarget then
+        local _saved = LV.ManualTargets
+        ddLVTarget:SetOptions(State.DisplayLVTarget)
+        LV.ManualTargets = _saved
+    end
+end
+
+-- ============================================================
+-- ALWAYS OPEN GUI
+-- ============================================================
+local function setAlwaysOpen(on)
+    pcall(function() LP.PlayerGui.ActivePetUI.Enabled = not on end)
+end
+
+-- ============================================================
+-- EQUIP / UNEQUIP HELPERS
+-- ============================================================
+local function equipList(uuids)
+    PnP.SyncPaused = true
+    for _, uuid in ipairs(uuids) do equipPet(uuid); task.wait(0.3) end
+    PnP.SyncPaused = false
+end
+
+local function unequipList(uuids)
+    PnP.SyncPaused = true
+    for _, uuid in ipairs(uuids) do unequipPet(uuid); task.wait(0.25) end
+    PnP.SyncPaused = false
+end
+
+local function switchList(from, to)
+    PnP.SyncPaused = true
+    for _, uuid in ipairs(from) do unequipPet(uuid); task.wait(0.25) end
+    for _, uuid in ipairs(to)   do equipPet(uuid);   task.wait(0.3)  end
+    PnP.SyncPaused = false
+end
+
+-- ============================================================
+-- AUTO KG – LOOP
+-- ============================================================
+local lvStartLoop
+
+local function triggerLVAfterKG()
+    task.wait(0.5)
+    local seen, merged = {}, {}
+    for _, dn in ipairs(LV.ManualTargets) do
+        local p = petOf(dn)
+        if p and not seen[p.uuid] then
+            seen[p.uuid] = true; table.insert(merged, dn)
+        end
+    end
+    if LV.FromKG then
+        for uuid in pairs(KG.DoneUUIDs) do
+            if not seen[uuid] then
+                seen[uuid] = true
+                for _, p in ipairs(State.AllPets) do
+                    if p.uuid == uuid then table.insert(merged, p.display); break end
+                end
+            end
+        end
+    end
+    LV.Targets   = merged
+    LV.Status    = {}
+    LV.DoneUUIDs = {}
+    for _, dn in ipairs(LV.Targets) do
+        local p = petOf(dn)
+        if p then LV.Status[p.uuid] = "waiting" end
+    end
+    if #LV.Targets == 0 then
+        win:luluNotify("LV: tidak ada target — pilih pet di dropdown atau aktifkan Auto Select KG", "warning")
+        LV.Running = false
+        pcall(function() if tglLVStart then tglLVStart:SetState(false) end end)
+    else
+        pcall(function() if tglLVStart then tglLVStart:SetState(true) end end)
+        win:luluNotify("KG Done → LV Started! (" .. #LV.Targets .. " pets)", "success")
+        task.spawn(function() notifyLVStarted(LV.Targets, LV.TargetAge) end)
+        lvStartLoop()
+    end
+end
+
+local function kgStartLoop()
+    -- FIX 5: KG.Thread (kapital), bukan kG.Thread
+    if KG.Thread then pcall(function() task.cancel(KG.Thread) end) end
+    KG.ActivePhases = {}
+
+    KG.Thread = task.spawn(function()
+        unequipAllActive()
+
+        if LV.WaitingForKG then
+            local seen, merged = {}, {}
+            for _, dn in ipairs(LV.ManualTargets) do
+                local p = petOf(dn)
+                if p and not seen[p.uuid] then seen[p.uuid] = true; table.insert(merged, dn) end
+            end
+            for _, dn in ipairs(KG.Targets) do
+                local p = petOf(dn)
+                if p and not seen[p.uuid] then seen[p.uuid] = true; table.insert(merged, dn) end
+            end
+            LV.Targets   = merged
+            LV.Status    = {}
+            LV.DoneUUIDs = {}
+            for _, dn in ipairs(LV.Targets) do
+                local p = petOf(dn); if p then LV.Status[p.uuid] = "waiting" end
+            end
+            win:luluNotify(
+                "KG Started → LV Standby update: " .. #LV.Targets .. " pets (LV + KG list)",
+                "info"
+            )
+        end
+
+        local queue = {}
+        for _, dn in ipairs(KG.Targets) do
+            local p = petOf(dn); if p then table.insert(queue, p) end
+        end
+
+        if #queue == 0 then
+            KG.Running = false
+            pcall(function() if tglKGStart then tglKGStart:SetState(false) end end)
+            win:luluNotify("Tidak ada target KG — pilih pet dulu!", "warning")
+            return
+        end
+
+        local active     = {}
+        local upkgQueue  = {}
+        local upkgSlot   = nil
+        local upkgChecks = {}
+        local requeue    = {}
+        local kgPetCounter = 0
+        local kgTotalQueue = #queue
+
+        local qi = 1
+        local function pickNext()
+            while qi <= #queue do
+                local p = queue[qi]; qi = qi + 1
+                if KG.Status[p.uuid] ~= "done" and KG.Status[p.uuid] ~= "waiting_kg" then
+                    return p
+                end
+            end
+            if #requeue > 0 then
+                queue = requeue; requeue = {}; qi = 1
+                kgPetCounter = 0
+                kgTotalQueue = #queue
+                return pickNext()
+            end
+            return nil
+        end
+
+        local function checkAllHelpersFired()
+            if #jumboLabelOrder == 0 then return false end
+            for _, uuid in ipairs(jumboLabelOrder) do
+                if not jumboFiredPerHelper[uuid] then return false end
+            end
+            return true
+        end
+
+        local function resetHelperFiredStatus()
+            for _, uuid in ipairs(jumboLabelOrder) do
+                jumboFiredPerHelper[uuid] = nil
+            end
+        end
+
+        local function startNextUpkg(keepHelper)
+            if upkgSlot or #upkgQueue == 0 then return end
+            upkgSlot = table.remove(upkgQueue, 1)
+            resetHelperFiredStatus()
+            KG.Status[upkgSlot.uuid]       = "progres"
+            KG.ActivePhases[upkgSlot.uuid] = "upkg"
+            equipPet(upkgSlot.uuid); task.wait(0.4)
+            if not keepHelper then equipList(KG.UpKG) end
+        end
+
+        local function finalizeUpkgBatch()
+            unequipAllActive(); task.wait(0.8)
+            resetHelperFiredStatus()
+
+            for _, checked in ipairs(upkgChecks) do
+                local prevKG  = KG.CurrentKG[checked.uuid] or KG.LastKnown[checked.uuid] or 0
+                local finalKG = nil
+                for _ = 1, 5 do
+                    local scan = rescanPetTarget(checked.uuid)
+                    if scan.kg > 0 then
+                        finalKG = scan.kg
+                        KG.CurrentKG[checked.uuid] = finalKG
+                        break
+                    end
+                    task.wait(1)
+                end
+                if finalKG == nil then
+                    finalKG = KG.LastKnown[checked.uuid] or 0
+                    KG.CurrentKG[checked.uuid] = finalKG
+                end
+                task.spawn(function() notifyPetKGUpdate(checked.name, prevKG, finalKG) end)
+
+                if KG.TargetBase == 0 or finalKG >= KG.TargetBase then
+                    KG.Status[checked.uuid]       = "done"
+                    KG.DoneUUIDs[checked.uuid]    = checked.name or ""
+                    KG.ActivePhases[checked.uuid] = nil
+                    task.spawn(function() notifyPetKGDone(checked.name, finalKG) end)
+                else
+                    KG.Status[checked.uuid]       = "waiting"
+                    KG.ActivePhases[checked.uuid] = nil
+                    table.insert(requeue, {
+                        uuid = checked.uuid, display = checked.display, name = checked.name
+                    })
+                end
+            end
+            upkgChecks = {}
+            rebuildKGTargetDisplay()
+
+            if KG.ByStep then
+                while #active < KG.Many do
+                    local nxt = pickNext(); if not nxt then break end
+                    kgPetCounter = kgPetCounter + 1
+                    KG.Status[nxt.uuid]       = "progres"
+                    KG.ActivePhases[nxt.uuid] = "lv1"
+                    table.insert(active, {
+                        uuid = nxt.uuid, display = nxt.display, name = nxt.name, phase = "lv1"
+                    })
+                    task.spawn(notifyPetKGLevelingSwitch, nxt.name, "lv1", kgPetCounter, kgTotalQueue)
+                    equipPet(nxt.uuid); task.wait(0.4)
+                end
+
+                if #active > 0 then
+                    local hasLv2 = false
+                    for _, a in ipairs(active) do if a.phase == "lv2" then hasLv2 = true end end
+                    equipList(hasLv2 and KG.Lv2 or KG.Lv1)
+                end
+            end
+        end
+
+        -- Initial fill
+        while #active < KG.Many do
+            local nxt = pickNext(); if not nxt then break end
+            kgPetCounter = kgPetCounter + 1
+            KG.Status[nxt.uuid]       = "progres"
+            KG.ActivePhases[nxt.uuid] = "lv1"
+            table.insert(active, {
+                uuid = nxt.uuid, display = nxt.display, name = nxt.name, phase = "lv1"
+            })
+            task.spawn(notifyPetKGLevelingSwitch, nxt.name, "lv1", kgPetCounter, kgTotalQueue)
+            equipPet(nxt.uuid); task.wait(0.4)
+        end
+
+        equipList(KG.Lv1)
+
+        while KG.Running do
+            task.wait(1)
+
+            if upkgSlot then
+                local targetAge = getAge(upkgSlot.uuid)
+                if targetAge == 1 then
+                    local savedSlot = upkgSlot
+                    unequipPet(savedSlot.uuid); task.wait(0.8)
+
+                    local prevKGSlot = KG.CurrentKG[savedSlot.uuid] or KG.LastKnown[savedSlot.uuid] or 0
+                    local finalKG    = nil
+                    local preKG      = KG.LastKnown[savedSlot.uuid] or 0
+                    for _ = 1, 5 do
+                        local scan = rescanPetTarget(savedSlot.uuid)
+                        if scan.kg > 0 then
+                            finalKG = scan.kg
+                            KG.CurrentKG[savedSlot.uuid] = finalKG
+                            break
+                        end
+                        task.wait(1)
+                    end
+                    if finalKG == nil then
+                        finalKG = preKG
+                        KG.CurrentKG[savedSlot.uuid] = finalKG
+                    end
+                    task.spawn(function() notifyPetKGUpdate(savedSlot.name, prevKGSlot, finalKG) end)
+
+                    if KG.TargetBase == 0 then
+                        KG.Status[savedSlot.uuid]       = "done"
+                        KG.DoneUUIDs[savedSlot.uuid]    = savedSlot.name or ""
+                        KG.ActivePhases[savedSlot.uuid] = nil
+                        task.spawn(function() notifyPetKGDone(savedSlot.name, finalKG) end)
+                    elseif finalKG >= KG.TargetBase then
+                        KG.Status[savedSlot.uuid]       = "done"
+                        KG.DoneUUIDs[savedSlot.uuid]    = savedSlot.name or ""
+                        KG.ActivePhases[savedSlot.uuid] = nil
+                        task.spawn(function() notifyPetKGDone(savedSlot.name, finalKG) end)
+                    else
+                        KG.Status[savedSlot.uuid]       = "waiting"
+                        KG.ActivePhases[savedSlot.uuid] = nil
+                        table.insert(requeue, {
+                            uuid = savedSlot.uuid, display = savedSlot.display, name = savedSlot.name
+                        })
+                    end
+
+                    resetHelperFiredStatus()
+                    upkgSlot = nil
+                    rebuildKGTargetDisplay()
+
+                    if #upkgQueue > 0 then
+                        startNextUpkg(true)
+                    else
+                        finalizeUpkgBatch()
+                    end
+
+                elseif checkAllHelpersFired() then
+                    resetHelperFiredStatus()
+                    unequipPet(upkgSlot.uuid); task.wait(0.3)
+                    KG.ActivePhases[upkgSlot.uuid] = "check"
+                    table.insert(upkgChecks, upkgSlot)
+                    upkgSlot = nil
+
+                    if #upkgQueue > 0 then
+                        startNextUpkg(true)
+                    else
+                        finalizeUpkgBatch()
+                    end
+                end
+            end
+
+            local i = 1
+            while i <= #active do
+                local t   = active[i]
+                local age = getAge(t.uuid)
+
+                if t.phase == "lv1" then
+                    if age >= 30 and #KG.Lv2 > 0 then
+                        t.phase                = "lv2"
+                        KG.ActivePhases[t.uuid] = "lv2"
+                        switchList(KG.Lv1, KG.Lv2)
+
+                    elseif age >= 50 then
+                        KG.LastKnownAge[t.uuid]   = age
+                        KG.Status[t.uuid]         = "waiting_kg"
+                        KG.ActivePhases[t.uuid]   = "upkg_wait"
+                        unequipPet(t.uuid); task.wait(0.3)
+                        table.insert(upkgQueue, {
+                            uuid = t.uuid, display = t.display, name = t.name
+                        })
+                        table.remove(active, i)
+
+                        local needLv1 = false
+                        for _, a in ipairs(active) do
+                            if a.phase == "lv1" then needLv1 = true; break end
+                        end
+                        if not needLv1 then unequipList(KG.Lv1) end
+
+                        if KG.ByStep then
+                            local nxt = pickNext()
+                            if nxt then
+                                kgPetCounter = kgPetCounter + 1
+                                KG.Status[nxt.uuid]       = "progres"
+                                KG.ActivePhases[nxt.uuid] = "lv1"
+                                table.insert(active, {
+                                    uuid = nxt.uuid, display = nxt.display, name = nxt.name, phase = "lv1"
+                                })
+                                task.spawn(notifyPetKGLevelingSwitch, nxt.name, "lv1", kgPetCounter, kgTotalQueue)
+                                equipPet(nxt.uuid); task.wait(0.4)
+                                equipList(KG.Lv1)
+                            end
+                        end
+                        continue
+                    end
+
+                elseif t.phase == "lv2" then
+                    if age >= 50 then
+                        KG.LastKnownAge[t.uuid]   = age
+                        KG.Status[t.uuid]         = "waiting_kg"
+                        KG.ActivePhases[t.uuid]   = "upkg_wait"
+                        unequipPet(t.uuid); task.wait(0.3)
+                        table.insert(upkgQueue, {
+                            uuid = t.uuid, display = t.display, name = t.name
+                        })
+                        table.remove(active, i)
+
+                        local needLv2 = false
+                        for _, a in ipairs(active) do
+                            if a.phase == "lv2" then needLv2 = true; break end
+                        end
+                        if not needLv2 then unequipList(KG.Lv2) end
+
+                        if KG.ByStep then
+                            local nxt = pickNext()
+                            if nxt then
+                                kgPetCounter = kgPetCounter + 1
+                                KG.Status[nxt.uuid]       = "progres"
+                                KG.ActivePhases[nxt.uuid] = "lv1"
+                                table.insert(active, {
+                                    uuid = nxt.uuid, display = nxt.display, name = nxt.name, phase = "lv1"
+                                })
+                                task.spawn(notifyPetKGLevelingSwitch, nxt.name, "lv1", kgPetCounter, kgTotalQueue)
+                                equipPet(nxt.uuid); task.wait(0.4)
+                                equipList(KG.Lv1)
+                            end
+                        end
+                        continue
+                    end
+                end
+
+                i = i + 1
+            end
+
+            if #active == 0 and not upkgSlot and #upkgQueue > 0 then
+                startNextUpkg(false)
+            end
+
+            if not upkgSlot and #upkgQueue == 0 then
+                local canFill = KG.ByStep or (#active == 0 and #upkgChecks == 0)
+                if canFill then
+                    local added = false
+                    while #active < KG.Many do
+                        local nxt = pickNext(); if not nxt then break end
+                        kgPetCounter = kgPetCounter + 1
+                        KG.Status[nxt.uuid]       = "progres"
+                        KG.ActivePhases[nxt.uuid] = "lv1"
+                        table.insert(active, {
+                            uuid = nxt.uuid, display = nxt.display, name = nxt.name, phase = "lv1"
+                        })
+                        task.spawn(notifyPetKGLevelingSwitch, nxt.name, "lv1", kgPetCounter, kgTotalQueue)
+                        equipPet(nxt.uuid); task.wait(0.4)
+                        added = true
+                    end
+                    if added then equipList(KG.Lv1) end
+                end
+            end
+
+            if #active == 0 and not upkgSlot
+               and #upkgQueue == 0 and #upkgChecks == 0 and #requeue == 0 then
+                break
+            end
+        end
+
+        KG.ActivePhases = {}
+        for _, t in ipairs(active) do pcall(function() unequipPet(t.uuid) end) end
+        if upkgSlot then pcall(function() unequipPet(upkgSlot.uuid) end) end
+
+        if KG.Running then
+            KG.Running = false
+            KG.AllDone = true
+            unequipAllActive()
+            task.wait(0.5)
+            KG.Thread = nil
+            KG.CompletedNaturally = true
+            pcall(function() if tglKGStart then tglKGStart:SetState(false) end end)
+            win:luluNotify("Automatelly Up Kg Done All Done", "success")
+            if Webhook.KG then
+                sendWebhookEmbed({
+                    title       = "Automatelly Up KG Done!",
+                    description = "Semua **" .. #KG.Targets .. " pets** selesai Up KG.",
+                    color       = 0x57F287,
+                    footer      = { text = "LuluXGAG " .. SCRIPT_VERSION },
+                    timestamp   = os.date("!%Y-%m-%dT%H:%M:%S"),
+                })
+            end
+            if LV.FromKG or LV.WaitingForKG then
+                LV.WaitingForKG = false
+                if not LV.Running then
+                    LV.Running = true
+                    LV.AllDone = false
+                end
+                task.spawn(triggerLVAfterKG)
+            end
+        end
+    end)
+end
+
+-- ============================================================
+-- AUTO LV – LOOP
+-- ============================================================
+lvStartLoop = function()
+    if LV.Thread then pcall(function() task.cancel(LV.Thread) end) end
+    LV.Thread = task.spawn(function()
+        unequipAllActive()
+
+        local queue = {}
+        for _, dn in ipairs(LV.Targets) do
+            local p = petOf(dn); if p then table.insert(queue, p) end
+        end
+
+        local active = {}
+        local qi = 1
+        local function pickNext()
+            while qi <= #queue do
+                local p = queue[qi]; qi = qi + 1
+                if LV.Status[p.uuid] ~= "done" then return p end
+            end
+            return nil
+        end
+
+        while #active < LV.Many do
+            local nxt = pickNext(); if not nxt then break end
+            LV.Status[nxt.uuid] = "progres"
+            table.insert(active, {
+                uuid = nxt.uuid, display = nxt.display, name = nxt.name, phase = "lv1"
+            })
+            equipPet(nxt.uuid); task.wait(0.4)
+        end
+
+        equipList(LV.Lv1)
+
+        while LV.Running do
+            task.wait(1)
+
+            local i = 1
+            while i <= #active do
+                local t   = active[i]
+                local age = getAge(t.uuid)
+
+                if t.phase == "lv1" and age >= 40 and #LV.Lv2 > 0 then
+                    t.phase = "lv2"
+                    switchList(LV.Lv1, LV.Lv2)
+                    task.spawn(function() notifyPetLVPhase(t.name, age, "lv2") end)
+
+                elseif age >= LV.TargetAge then
+                    LV.Status[t.uuid]    = "done"
+                    LV.DoneUUIDs[t.uuid] = true
+                    rebuildLVTargetDisplay()
+                    unequipPet(t.uuid); task.wait(0.3)
+
+                    local lvDoneCount = 0
+                    for _ in pairs(LV.DoneUUIDs) do lvDoneCount = lvDoneCount + 1 end
+                    task.spawn(function() notifyPetLVDone(t.name, age, lvDoneCount, #LV.Targets) end)
+
+                    local nxt = pickNext()
+                    if nxt then
+                        LV.Status[nxt.uuid] = "progres"
+                        active[i] = {
+                            uuid = nxt.uuid, display = nxt.display, name = nxt.name, phase = "lv1"
+                        }
+                        if t.phase == "lv2" then
+                            switchList(LV.Lv2, LV.Lv1)
+                        end
+                        equipPet(nxt.uuid); task.wait(0.4)
+                    else
+                        table.remove(active, i)
+                        continue
+                    end
+                end
+
+                i = i + 1
+            end
+
+            if #active == 0 then break end
+
+            local lvAdded = false
+            while #active < LV.Many do
+                local nxt = pickNext(); if not nxt then break end
+                LV.Status[nxt.uuid] = "progres"
+                table.insert(active, {
+                    uuid = nxt.uuid, display = nxt.display, name = nxt.name, phase = "lv1"
+                })
+                equipPet(nxt.uuid); task.wait(0.4)
+                lvAdded = true
+            end
+            if lvAdded then equipList(LV.Lv1) end
+        end
+
+        for _, t in ipairs(active) do pcall(function() unequipPet(t.uuid) end) end
+
+        if LV.Running then
+            LV.Running = false
+            LV.AllDone = true
+            unequipAllActive()
+            task.wait(0.5)
+            refreshTargets()
+            pcall(function() if tglLVStart then tglLVStart:SetState(false) end end)
+            win:luluNotify("All Your Pets Success Leveling to Age " .. LV.TargetAge .. "!", "success")
+            if Webhook.LV then
+                task.spawn(function() notifyAllLVDone() end)
+            end
+        end
+    end)
+end
+
+-- anti afk
+task.spawn(function()
+    while true do
+        task.wait(60)
+        pcall(function()
+            VirtualUser:Button2Down(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
+            task.wait(1)
+            VirtualUser:Button2Up(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
+        end)
+    end
+end)
+
+-- ============================================================
+-- UI SETUP
+-- ============================================================
+ensureFolders()
+loadSettings()
+
+pcall(function()
+    if State.Disable3D then
+        game:GetService("RunService"):Set3dRenderingEnabled(false)
+    end
+end)
+task.defer(function()
+    if Lag.Spider  then startSpiderRemover()  end   -- FIX 8: kapital
+    if Lag.Pets    then startPetsRemover()    end
+    if Lag.Spotted then startSpottedRemover() end
+end)
+
+LuluUI.SetTheme("Purple")
+
+local win = LuluUI.new({
+    title    = "LuluXGAG",
+    subtitle = SCRIPT_VERSION,
+    name     = "LuluXGAG[PETSYSTEM]",
+    width    = 450,
+    height   = 345,
+})
+
+-- ============================================================
+-- INFO PANEL
+-- ============================================================
+local info = win:InfoPanel({ width = 210 })
+if not State.ShowInfo then info:Hide() end
+
+local grpOnProgress  = info:Group(); grpOnProgress:Hide()
+local grpJumbo       = info:Group(); grpJumbo:Hide()
+local grpPnp         = info:Group(); grpPnp:Hide()
+local grpAllProgress = info:Group(); grpAllProgress:Hide()
+local grpKalc        = info:Group(); grpKalc:Hide()
+local grpKalcRange   = info:Group(); grpKalcRange:Hide()
+
+local AUTOHIDE_TIMEOUT = 3
+local PRUNE_TIMEOUT    = 30
+
+task.spawn(function()
+    while true do
+        task.wait(1)
+        pcall(function()
+            local now = tick()   -- FIX 4: was boost.TICK()
+
+            local newJumboOrder = {}
+            for _, uuid in ipairs(jumboLabelOrder) do
+                if jumboLastSeen[uuid] and (now - jumboLastSeen[uuid]) < PRUNE_TIMEOUT then
+                    table.insert(newJumboOrder, uuid)
+                else
+                    jumboBlessings[uuid]      = nil
+                    jumboFiredPerHelper[uuid]  = nil
+                    jumboLastSeen[uuid]        = nil
+                    jumboLabelSet[uuid]        = nil
+                end
+            end
+            jumboLabelOrder = newJumboOrder
+
+            local newPnpOrder = {}
+            for _, uuid in ipairs(PnP.LabelOrder) do
+                if PnP.LastSeen[uuid] and (now - PnP.LastSeen[uuid]) < PRUNE_TIMEOUT then
+                    table.insert(newPnpOrder, uuid)
+                else
+                    PnP.Status[uuid]     = nil
+                    PnP.LastSeen[uuid]   = nil
+                    PnP.LabelSet[uuid]   = nil
+                    PnP.PrevCD[uuid]     = nil
+                    PnP.Processing[uuid] = nil
+                end
+            end
+            PnP.LabelOrder = newPnpOrder
+
+            if not State.ShowInfo then
+                info:Hide()
+                return
+            end
+            info:Show()
+
+            local activePets = getActivePets()
+            local activeMap  = {}
+            for _, ap in ipairs(activePets) do
+                activeMap[ap.uuid] = ap
+                if ap.type and ap.type ~= "" then
+                    State.UUIDToType[ap.uuid] = ap.type
+                end
+            end
+
+            local targets, statusMap
+            if KG.Running then
+                targets   = KG.Targets
+                statusMap = KG.Status
+            elseif LV.Running then
+                targets   = LV.Targets
+                statusMap = LV.Status
+            elseif LV.WaitingForKG then
+                targets   = LV.Targets
+                statusMap = LV.Status
+            elseif KG.AllDone then
+                targets   = KG.Targets
+                statusMap = KG.Status
+            elseif LV.AllDone then
+                targets   = LV.Targets
+                statusMap = LV.Status
+            else
+                targets   = {}
+                statusMap = {}
+            end
+
+            local cntProgres, cntWaiting, cntDone = 0, 0, 0
+            for _, dn in ipairs(targets) do
+                local p = petOf(dn); if not p then continue end
+                local st = statusMap[p.uuid] or "waiting"
+                if st == "progres" or st == "waiting_kg" then
+                    cntProgres = cntProgres + 1
+                elseif st == "waiting" then
+                    cntWaiting = cntWaiting + 1
+                else
+                    cntDone = cntDone + 1
+                end
+            end
+
+            local modeName
+            if KG.Running          then modeName = "Automatelly Up KG"
+            elseif LV.Running      then modeName = "Automatelly Leveling"
+            elseif LV.WaitingForKG then modeName = "LV Standby (tunggu KG)"
+            elseif KG.AllDone      then modeName = "Up KG Done"
+            elseif LV.AllDone      then modeName = "Leveling Done"
+            end
+
+            local jumboCount = 0
+            for _, uuid in ipairs(jumboLabelOrder) do
+                if jumboLastSeen[uuid] and (now - jumboLastSeen[uuid]) < AUTOHIDE_TIMEOUT then
+                    jumboCount = jumboCount + 1
+                end
+            end
+
+            local pnpCount = 0
+            for _, uuid in ipairs(PnP.LabelOrder) do
+                if PnP.LastSeen[uuid] and (now - PnP.LastSeen[uuid]) < AUTOHIDE_TIMEOUT then
+                    pnpCount = pnpCount + 1
+                end
+            end
+
+            -- COMPACT MODE
+            if not State.DetailInfo then
+                if State.ShowProgress and modeName and #targets > 0 then
+                    grpOnProgress:Show()
+                    grpOnProgress:Clear()
+                    grpOnProgress:Header("On Progres")
+                    grpOnProgress:QuestLine("Mode",    modeName)
+                    grpOnProgress:QuestLine("Progres", tostring(cntProgres))
+                    grpOnProgress:QuestLine("Waiting", tostring(cntWaiting))
+                    grpOnProgress:QuestLine("Done",    tostring(cntDone))
+                    if LV.WaitingForKG then
+                        grpOnProgress:QuestLine("LV Standby", tostring(#LV.Targets) .. " pets")
+                    end
+                else
+                    grpOnProgress:Hide()
+                end
+
+                if State.ShowBlessing and jumboCount > 0 then
+                    grpJumbo:Show()
+                    grpJumbo:Clear()
+                    grpJumbo:Header("Jumbo panel")
+                    grpJumbo:QuestLine("Pets", tostring(jumboCount))
+                else
+                    grpJumbo:Hide()
+                end
+
+                if State.ShowPnp and PnP.Running and pnpCount > 0 then
+                    grpPnp:Show()
+                    grpPnp:Clear()
+                    grpPnp:Header("PnP panel")
+                    grpPnp:QuestLine("Pets", tostring(pnpCount))
+                else
+                    grpPnp:Hide()
+                end
+
+                grpAllProgress:Hide()
+                return
+            end
+
+            -- FULL / DETAIL MODE
+            local progresItems = {}
+            for _, dn in ipairs(targets) do
+                local p = petOf(dn); if not p then continue end
+                local st = statusMap[p.uuid] or "waiting"
+                if st == "progres" then table.insert(progresItems, p) end
+            end
+
+            if State.ShowProgress and #progresItems > 0 then
+                grpOnProgress:Show()
+                grpOnProgress:Clear()
+                grpOnProgress:Header("On Progres")
+                for _, p in ipairs(progresItems) do
+                    local ap    = activeMap[p.uuid]
+                    local phase = KG.ActivePhases[p.uuid]
+                    local petType = State.UUIDToType[p.uuid] or ""
+                    local name    = petType ~= "" and petType or p.name
+
+                    local age
+                    if ap then
+                        age = tostring(ap.age)
+                    elseif phase == "upkg" then
+                        age = tostring(KG.LastKnownAge[p.uuid] or 50)
+                    else
+                        age = tostring(getAge(p.uuid))
+                    end
+
+                    local baseStr
+                    if KG.Running then
+                        baseStr = KG.CurrentKG[p.uuid]
+                            and (string.format("%.2f", KG.CurrentKG[p.uuid]) .. " KG")
+                            or  "-"
+                    else
+                        baseStr = age .. " Age"
+                    end
+
+                    grpOnProgress:QuestLine("Name", name)
+                    grpOnProgress:QuestLine("Age",  age)
+                    grpOnProgress:QuestLine("Base", baseStr)
+                end
+            else
+                grpOnProgress:Hide()
+            end
+
+            local hasActiveJumbo = jumboCount > 0
+            if State.ShowBlessing and hasActiveJumbo then
+                grpJumbo:Show()
+                grpJumbo:Clear()
+                grpJumbo:Header("Jumbo Panel")
+                for _, uuid in ipairs(jumboLabelOrder) do
+                    local jb = jumboBlessings[uuid]
+                    if not jb then continue end
+                    if not jumboLastSeen[uuid] or (now - jumboLastSeen[uuid]) >= AUTOHIDE_TIMEOUT then
+                        continue
+                    end
+                    local petType = State.UUIDToType[uuid] or ""
+                    local label   = petType ~= "" and petType or uuid:sub(1, 8)
+                    local cdStr   = jb.time == 0
+                        and "ready"
+                        or  (tostring(jb.time) .. (jumboFiredPerHelper[uuid] and " ✓" or ""))
+                    grpJumbo:QuestLine(label, cdStr)
+                end
+            else
+                grpJumbo:Hide()
+            end
+
+            local hasActivePnp = false
+            for _, uuid in ipairs(PnP.LabelOrder) do
+                if PnP.LastSeen[uuid] and (now - PnP.LastSeen[uuid]) < AUTOHIDE_TIMEOUT then
+                    hasActivePnp = true; break
+                end
+            end
+
+            if State.ShowPnp and PnP.Running and hasActivePnp then
+                grpPnp:Show()
+                grpPnp:Clear()
+                grpPnp:Header("PnP Panel")
+                for _, uuid in ipairs(PnP.LabelOrder) do
+                    local entry = PnP.Status[uuid]
+                    if not entry then continue end
+                    if not PnP.LastSeen[uuid] or (now - PnP.LastSeen[uuid]) >= AUTOHIDE_TIMEOUT then
+                        continue
+                    end
+                    local petType = State.UUIDToType[uuid] or ""
+                    local label   = petType ~= "" and petType or uuid:sub(1, 8)
+                    grpPnp:QuestLine(label, entry.cd == 0 and "ready" or tostring(entry.cd))
+                end
+            else
+                grpPnp:Hide()
+            end
+
+            local function sortOrder(st)
+                if st == "progres"        then return 1
+                elseif st == "waiting_kg" then return 2
+                elseif st == "waiting"    then return 3
+                else                           return 4
+                end
+            end
+
+            if State.ShowAllProg and #targets > 0 then
+                local snapParts = {}
+                for _, dn in ipairs(targets) do
+                    local p = petOf(dn); if not p then continue end
+                    local st = statusMap[p.uuid] or "waiting"
+                    local extra = ""
+                    if st == "progres" and KG.Running then
+                        local kg = KG.CurrentKG[p.uuid]
+                        if kg then extra = string.format("%.1f", kg) end
+                    end
+                    snapParts[#snapParts + 1] = p.uuid .. st .. extra
+                end
+                local lvStandby = LV.WaitingForKG and tostring(#LV.Targets) or ""
+                local snapshot  = table.concat(snapParts, "|") .. lvStandby
+
+                if snapshot ~= State.AllProgLastStatus then
+                    State.AllProgLastStatus = snapshot
+
+                    grpAllProgress:Show()
+                    grpAllProgress:Clear()
+                    grpAllProgress:Header("All Progress")
+
+                    local sorted = {}
+                    for _, dn in ipairs(targets) do
+                        local p = petOf(dn); if not p then continue end
+                        local st = statusMap[p.uuid] or "waiting"
+                        table.insert(sorted, { p = p, st = st, order = sortOrder(st) })
+                    end
+                    table.sort(sorted, function(a, b) return a.order < b.order end)
+
+                    for _, item in ipairs(sorted) do
+                        local p  = item.p
+                        local st = item.st
+                        local petType = State.UUIDToType[p.uuid] or ""
+                        local label   = petType ~= "" and petType or p.name
+
+                        local valueStr
+                        if st == "progres" then
+                            if KG.Running then
+                                local kg = KG.CurrentKG[p.uuid]
+                                valueStr = "on progres"
+                                    .. (kg and (" [" .. string.format("%.2f", kg) .. " KG]") or "")
+                            else
+                                local ap  = activeMap[p.uuid]
+                                local age = ap and tostring(ap.age) or tostring(getAge(p.uuid))
+                                valueStr  = "on progres [Age " .. age .. "]"
+                            end
+                        elseif st == "waiting_kg" then
+                            valueStr = "waiting KG"
+                        elseif st == "waiting" then
+                            valueStr = "waiting..."
+                        else
+                            if KG.Running or KG.AllDone then
+                                local kg = KG.CurrentKG[p.uuid] or KG.LastKnown[p.uuid]
+                                valueStr = "Done [" .. (kg and string.format("%.2f", kg) or "?") .. " KG]"
+                            else
+                                valueStr = "Done [Age " .. LV.TargetAge .. "]"
+                            end
+                        end
+
+                        grpAllProgress:QuestLine(label, valueStr)
+                    end
+
+                    if LV.WaitingForKG then
+                        grpAllProgress:Divider()
+                        grpAllProgress:QuestLine("LV Standby", #LV.Targets .. " pets (tunggu KG)")
+                    end
+                end
+            else
+                grpAllProgress:Hide()
+                State.AllProgLastStatus = ""
+            end
+        end)
+    end
+end)
+
+-- TAB: INFO
+local tabInfo = win:Tab("Info")
+
+tabInfo:Accordion("Script Info", function(sec)
+    sec:Label("LuluXGAG[PETSYSTEM]", { size = 14, bold = true })
+    sec:Label("Version: " .. SCRIPT_VERSION,    { size = 12, color = Color3.fromRGB(40, 160, 60) })
+    sec:Badge("I work alone, so don't expect too much from me",
+              { color = Color3.fromRGB(60, 200, 120) })
+    sec:Label("by Lulu_Attack", { size = 10, color = Color3.fromRGB(150, 150, 180) })
+    sec:Label("We are dev", { size = 10, color = Color3.fromRGB(150, 150, 180) })
+    sec:Label("Thanks for Widi", { size = 10, color = Color3.fromRGB(150, 150, 180) })
+end)
+
+-- TAB: MAIN
+local tabMain = win:Tab("Main")
+
+tabMain:Accordion("Setup", function(sec)
+    sec:Button("Rescan All Pets", function()
+        if KG.Running or LV.Running then
+            rescanTargetsOnly()
+            win:luluNotify("Rescan target only", "info")
+        else
+            refreshAll()
+            local eq = 0
+            for _ in pairs(State.EquippedUUIDs) do eq = eq + 1 end
+            win:luluNotify(
+                "Scan DONE! " .. #State.AllPets .. " total | " .. eq .. " equipped [★]",
+                "success"
+            )
+        end
+    end)
+
+    sec:Toggle("Always Open GUI", false, function(on)
+        setAlwaysOpen(on)
+    end)
+end)
+
+tabMain:Accordion("Auto Up KG", function(sec)
+    ddKGTarget = sec:MultiDropdown("Select Pets", State.DisplayKGTarget, {}, function(sel)
+        KG.Targets = sel
+        task.defer(function() rebuildLVFromKGList(false) end)
+    end)
+
+    sec:NumberInput("Target Count", KG.Many, 1, 1, 7, function(v)
+        KG.Many = v; saveSettings()
+    end)
+
+    sec:NumberInput("Target Base KG", KG.TargetBase, 0.01, 0, 999, function(v)
+        KG.TargetBase = v; saveSettings()
+    end)
+
+    sec:Toggle("Step Mode", KG.ByStep, function(on)
+        KG.ByStep = on; saveSettings()
+    end)
+
+    -- FIX 9: ddKG sebagai tabel
+    ddKG.Lv1 = sec:Dropdown("Leveling 1", getConfigsByType("leveling kg 1"), "", function(sel)
+        KG.Lv1 = getConfigUUIDs("leveling kg 1", sel)
+    end)
+
+    ddKG.Lv2 = sec:Dropdown("Leveling 2", getConfigsByType("leveling kg 2"), "", function(sel)
+        KG.Lv2 = getConfigUUIDs("leveling kg 2", sel)
+    end)
+
+    ddKG.UpKg = sec:Dropdown("Upgrade KG", getConfigsByType("upgrading kg"), "", function(sel)
+        KG.UpKG = getConfigUUIDs("upgrading kg", sel)
+    end)
+
+    tglKGStart = sec:Toggle("Start Auto Up KG", false, function(on)
+        KG.Running = on
+        if on then
+            KG.AllDone             = false
+            KG.Status              = {}
+            KG.DoneUUIDs           = {}
+            KG.ActivePhases        = {}
+            KG.LastKnown           = {}
+            KG.LastKnownAge        = {}
+            KG.CurrentKG           = {}
+            jumboFiredPerHelper    = {}
+            State.AllProgLastStatus = ""
+            for _, dn in ipairs(KG.Targets) do
+                local p = petOf(dn); if p then KG.Status[p.uuid] = "waiting" end
+            end
+            kgStartLoop()
+            task.spawn(function() notifyKGStarted(KG.Targets, KG.TargetBase) end)
+        else
+            if KG.CompletedNaturally then
+                KG.CompletedNaturally = false
+                return
+            end
+            pcall(function() if KG.Thread then task.cancel(KG.Thread) end end)
+            KG.Thread              = nil
+            KG.ActivePhases        = {}
+            jumboFiredPerHelper    = {}
+            State.AllProgLastStatus = ""
+            task.spawn(function()
+                unequipAllActive(); task.wait(0.5); refreshTargets()
+            end)
+        end
+    end)
+end)
+
+tabMain:Accordion("Auto Leveling", function(sec)
+    ddLVTarget = sec:MultiDropdown("Select Pets", State.Alldisplay, {}, function(sel)
+        LV.ManualTargets = sel
+    end)
+
+    sec:NumberInput("Target Count", LV.Many, 1, 1, 7, function(v)
+        LV.Many = v; saveSettings()
+    end)
+
+    sec:NumberInput("Target Level", LV.TargetAge, 1, 10, 100, function(v)
+        LV.TargetAge = v; saveSettings()
+    end)
+
+    ddLVLv1 = sec:Dropdown("Leveling 1", getConfigsByType("leveling lv 1"), "", function(sel)
+        LV.Lv1 = getConfigUUIDs("leveling lv 1", sel)
+    end)
+
+    ddLVLv2 = sec:Dropdown("Leveling 2", getConfigsByType("leveling lv 2"), "", function(sel)
+        LV.Lv2 = getConfigUUIDs("leveling lv 2", sel)
+    end)
+
+    sec:Toggle("Auto Select from KG", LV.FromKG, function(on)
+        LV.FromKG = on; saveSettings()
+    end)
+
+    tglLVStart = sec:Toggle("Start Auto Leveling", false, function(on)
+        if on then
+            LV.AllDone             = false
+            LV.DoneUUIDs           = {}
+            LV.Status              = {}
+            State.AllProgLastStatus = ""
+
+            local seen, merged = {}, {}
+            for _, dn in ipairs(LV.ManualTargets) do
+                local p = petOf(dn)
+                if p and not seen[p.uuid] then
+                    seen[p.uuid] = true; table.insert(merged, dn)
+                end
+            end
+
+            if LV.FromKG then
+                LV.Running      = false
+                LV.WaitingForKG = true
+                LV.Targets      = merged
+                for _, dn in ipairs(LV.Targets) do
+                    local p = petOf(dn); if p then LV.Status[p.uuid] = "waiting" end
+                end
+                if KG.Running then
+                    local seenKG = {}
+                    for _, dn in ipairs(LV.Targets) do
+                        local p = petOf(dn); if p then seenKG[p.uuid] = true end
+                    end
+                    for _, dn in ipairs(KG.Targets) do
+                        local p = petOf(dn)
+                        if p and not seenKG[p.uuid] then
+                            seenKG[p.uuid] = true; table.insert(LV.Targets, dn)
+                            LV.Status[p.uuid] = "waiting"
+                        end
+                    end
+                end
+                win:luluNotify(
+                    "LV Standby – menunggu KG selesai | " .. #LV.Targets .. " pets",
+                    "info"
+                )
+            else
+                LV.Running      = true
+                LV.WaitingForKG = false
+                LV.Targets      = merged
+                for _, dn in ipairs(LV.Targets) do
+                    local p = petOf(dn); if p then LV.Status[p.uuid] = "waiting" end
+                end
+                if #LV.Targets == 0 then
+                    LV.Running = false
+                    pcall(function() if tglLVStart then tglLVStart:SetState(false) end end)
+                    win:luluNotify("LV: tidak ada target – pilih pet di dropdown!", "warning")
+                else
+                    task.spawn(function() notifyLVStarted(LV.Targets, LV.TargetAge) end)
+                    lvStartLoop()
+                end
+            end
+        else
+            LV.Running      = false
+            LV.WaitingForKG = false
+            pcall(function() if LV.Thread then task.cancel(LV.Thread) end end)
+            LV.Thread              = nil
+            State.AllProgLastStatus = ""
+            task.spawn(function()
+                unequipAllActive(); task.wait(0.5); refreshTargets()
+            end)
+        end
+    end)
+end)
+
+tabMain:Accordion("Pick & Place Pets", function(sec)
+    ddPnPOnSkill = sec:MultiDropdown("On Skill", State.AllPetNames, {}, function(sel)
+        PnP.OnSkillPets  = sel
+        local selSet = {}
+        for _, n in ipairs(sel) do selSet[n] = true end
+        PnP.OnSkillUUIDs = {}
+        for _, p in ipairs(State.AllPets) do
+            if selSet[p.name] then PnP.OnSkillUUIDs[p.uuid] = true end
+        end
+        PnP.Status = {}; PnP.LabelOrder = {}; PnP.LabelSet = {}
+        PnP.Processing = {}; PnP.LastSeen = {}; PnP.PrevCD = {}
+    end)
+
+    ddPnPAfterSkill = sec:MultiDropdown("After Skill", State.AllPetNames, {}, function(sel)
+        PnP.AfterSkillPets  = sel
+        local selSet = {}
+        for _, n in ipairs(sel) do selSet[n] = true end
+        PnP.AfterSkillUUIDs = {}
+        PnP.PrevCD          = {}
+        for _, p in ipairs(State.AllPets) do
+            if selSet[p.name] then PnP.AfterSkillUUIDs[p.uuid] = true end
+        end
+        PnP.Status = {}; PnP.LabelOrder = {}; PnP.LabelSet = {}
+        PnP.Processing = {}; PnP.LastSeen = {}
+    end)
+
+    sec:NumberInput("Delay Pick", PnP.DelayPick, 0.01, 0, 60, function(v)
+        PnP.DelayPick = v; saveSettings()
+    end)
+
+    sec:NumberInput("Delay Place", PnP.DelayPlace, 0.01, 0, 60, function(v)
+        PnP.DelayPlace = v; saveSettings()
+    end)
+
+    sec:Toggle("Sync", PnP.Sync, function(on)
+        PnP.Sync = on; saveSettings()
+    end)
+
+    sec:Toggle("Start PnP", false, function(on)
+        PnP.Running = on
+        if on then
+            PnP.Status     = {}
+            PnP.LabelOrder = {}
+            PnP.LabelSet   = {}
+            PnP.Processing = {}
+            PnP.PrevCD     = {}
+            local onCt, aftCt = 0, 0
+            for _ in pairs(PnP.OnSkillUUIDs)    do onCt  = onCt  + 1 end
+            for _ in pairs(PnP.AfterSkillUUIDs) do aftCt = aftCt + 1 end
+            win:luluNotify(
+                "PnP ON | OnSkill: " .. onCt .. " | AfterSkill: " .. aftCt .. " pets",
+                "success"
+            )
+        else
+            PnP.Processing = {}
+            PnP.LabelOrder = {}
+            PnP.LabelSet   = {}
+            PnP.Status     = {}
+            PnP.LastSeen   = {}
+            PnP.PrevCD     = {}
+            win:luluNotify("PnP OFF", "warning")
+        end
+    end)
+end)
+
+tabMain:Accordion("Auto Toy Boost", function(sec)
+    sec:Button("Scan Pets", function()
+        local count = doScanBoostPets()
+        if ddBoostPets then ddBoostPets:SetOptions(boost.Displays) end
+        boost.Selected = {}
+
+        local hasSmall  = findBoostTool("Small")  ~= nil
+        local hasMedium = findBoostTool("Medium") ~= nil
+        local toolInfo  = ""
+        if hasSmall  then toolInfo = toolInfo .. "Small  " end
+        if hasMedium then toolInfo = toolInfo .. "Medium" end
+        if not hasSmall and not hasMedium then toolInfo = "you not have toy" end
+        win:luluNotify(
+            "Scan Done! " .. count .. " pets | " .. toolInfo,
+            (hasSmall or hasMedium) and "success" or "warning"
+        )
+    end)
+
+    ddBoostPets = sec:MultiDropdown("Select Pets", boost.Displays, {}, function(sel)
+        boost.Selected = sel; saveSettings()
+    end)
+
+    sec:Dropdown("Select Toy", { "Both", "Small", "Medium" }, boost.ToyMode, function(sel)
+        boost.ToyMode = sel; saveSettings()
+    end)
+
+    sec:NumberInput("Delay Boost (menit)", boost.DelayMin, 1, 1, 5, function(v)
+        boost.DelayMin = v
+        boost.Duration = v * 60
+        saveSettings()
+    end)
+
+    sec:Button("Apply Once", function()
+        if #boost.Selected == 0 then
+            win:luluNotify("chose pet first!", "warning"); return
+        end
+        local uuids = getBoostSelectedUUIDs()
+        if #uuids == 0 then
+            win:luluNotify("Rescann – pet not found!", "warning"); return
+        end
+        if not findBoostTool("Small") and not findBoostTool("Medium") then
+            win:luluNotify("Toy not have!", "warning"); return
+        end
+        win:luluNotify("Applying to " .. #uuids .. " pet(s)...", "info")
+        task.spawn(function()
+            for _, uuid in ipairs(uuids) do
+                pcall(function() applyBoostDirect(uuid) end)
+            end
+            win:luluNotify("Boost applied.", "success")
+        end)
+    end)
+
+    sec:Toggle("Auto Boost", false, function(on)
+        boost.Running = on
+        if on then
+            if #boost.Selected == 0 then boost.Running = false; return end
+            local uuids = getBoostSelectedUUIDs()
+            if #uuids == 0 then boost.Running = false; return end
+            if not findBoostTool("Small") and not findBoostTool("Medium") then
+                boost.Running = false; return
+            end
+            boost.Timers = {}
+            for _, uuid in ipairs(uuids) do
+                boost.Timers[uuid] = { st = 0, mt = 0 }
+            end
+            startBoostLoop()
+        else
+            if boost.Thread then
+                pcall(function() task.cancel(boost.Thread) end)
+            end
+            boost.Thread = nil
+            boost.Timers = {}
+        end
+    end)
+end)
+
+tabMain:Accordion("Loadout", function(sec)
+    local selectedLoadout = ""
+    ddOthersLoadout = sec:Dropdown(
+        "Select Config",
+        getConfigsByType("custom loadout"),
+        "",
+        function(sel) selectedLoadout = sel end
+    )
+
+    sec:Button("Load Settings", function()
+        if selectedLoadout == "" then
+            win:luluNotify("chise config first!", "warning"); return
+        end
+        State.OthersLoadoutUUIDs = getConfigUUIDs("custom loadout", selectedLoadout)
+        if #State.OthersLoadoutUUIDs == 0 then
+            win:luluNotify("Config nill or not found!", "warning"); return
+        end
+        task.spawn(function()
+            win:luluNotify("Unequipping...", "info")
+            unequipAllActive()
+            equipList(State.OthersLoadoutUUIDs)
+            win:luluNotify(
+                "Loaded: " .. selectedLoadout .. " [" .. #State.OthersLoadoutUUIDs .. " pets]",
+                "success"
+            )
+        end)
+    end)
+end)
+
+-- TAB: NEW
+local tabNew = win:Tab("New")
+
+tabNew:Accordion("Easter Egg", function(sec)
+    sec:Toggle("Auto Easter Egg", false, function(on)
+        if on then startEggTP() else stopEggTP() end
+    end)
+end)
+
+tabNew:Accordion("Calculator", function(sec)
+    sec:NumberInput("Age", kalcAge, 1, 1, 125, function(v)
+        kalcAge = v
+    end)
+
+    sec:NumberInput("Weight", kalcWeight, 0.01, 0.01, 9999, function(v)
+        kalcWeight = v
+    end)
+
+    sec:Toggle("Show Range [100–125]", false, function(on)
+        kalcShowRange = on
+        if not on then grpKalcRange:Hide() end
+    end)
+
+    sec:Button("Calculate", function()
+        local base = kalcWeight / (1 + KALC_MULT * (kalcAge - 1))
+        local a100 = base * (1 + KALC_MULT * 99)
+        local a125 = base * (1 + KALC_MULT * 124)
+        grpKalc:Show()
+        grpKalc:Clear()
+        grpKalc:Header("Info Pets")
+        grpKalc:QuestLine("Base",    string.format("%.2f KG", base))
+        grpKalc:QuestLine("Age 100", string.format("%.2f KG", a100))
+        grpKalc:QuestLine("Age 125", string.format("%.2f KG", a125))
+
+        if kalcShowRange then
+            grpKalcRange:Show()
+            grpKalcRange:Clear()
+            grpKalcRange:Header("Age 100 - 125")
+            for a = 100, 125 do
+                local kg = base * (1 + KALC_MULT * (a - 1))
+                grpKalcRange:QuestLine("Age " .. a, string.format("%.2f KG", kg))
+            end
+        else
+            grpKalcRange:Hide()
+        end
+        win:luluNotify("Calculated!", "success")
+    end)
+
+    sec:Button("Clear", function()
+        kalcAge    = 1
+        kalcWeight = 1
+        grpKalc:Hide()
+        grpKalcRange:Hide()
+        win:luluNotify("Cleared", "info")
+    end)
+end)
+
+-- TAB: MISC
+local tabMisc = win:Tab("Misc")
+
+tabMisc:Accordion("Save Config Pets", function(sec)
+    local selectedConfigType = CONFIG_TYPES[1]
+    ddSaveConfigSelect = sec:Dropdown(
+        "Config Type",
+        CONFIG_TYPES,
+        CONFIG_TYPES[1],
+        function(sel) selectedConfigType = sel end
+    )
+
+    local configNameInput = ""
+    inpConfigName = sec:TextInput("Config Name", "", function(txt)
+        configNameInput = txt
+    end)
+
+    sec:Button("Save Config", function()
+        if configNameInput == "" then
+            win:luluNotify("create nama config first!", "warning"); return
+        end
+        local uuids = {}
+        pcall(function()
+            for _, child in ipairs(getPetDisplay():GetChildren()) do
+                if child:IsA("Frame") and child:FindFirstChild("Main") then
+                    table.insert(uuids, child.Name)
+                end
+            end
+        end)
+        if #uuids == 0 then
+            win:luluNotify("No have pet equipped in garden!", "warning"); return
+        end
+        local ok, err = saveNamedConfig(selectedConfigType, configNameInput, uuids)
+        if ok then
+            rebuildConfigDropdowns()
+            win:luluNotify(
+                "Saved! [" .. selectedConfigType .. "] → " .. configNameInput
+                .. " (" .. #uuids .. " pets)",
+                "success"
+            )
+        else
+            win:luluNotify("failed save: " .. tostring(err):sub(1, 60), "warning")
+        end
+    end)
+end)
+
+tabMisc:Accordion("Delete Config Pets", function(sec)
+    local selectedToDelete = ""
+    ddDeleteConfig = sec:Dropdown("Select Config", getAllConfigEntries(), "", function(sel)
+        selectedToDelete = sel
+    end)
+
+    sec:Button("Delete Config", function()
+        if selectedToDelete == "" then
+            win:luluNotify("chose config for delete first!", "warning"); return
+        end
+        local configType, configName = selectedToDelete:match("^(.+) : (.+)$")
+        if not configType or not configName then
+            win:luluNotify("Format not valid!", "warning"); return
+        end
+        local ok, err = deleteNamedConfig(configType, configName)
+        if ok then
+            rebuildConfigDropdowns()
+            win:luluNotify("Deleted: " .. selectedToDelete, "success")
+            selectedToDelete = ""
+        else
+            win:luluNotify("Gagal delete: " .. tostring(err):sub(1, 60), "warning")
+        end
+    end)
+end)
+
+tabMisc:Accordion("Webhook", function(sec)
+    inpWebhookUrl = sec:TextInput("Webhook URL", Webhook.Url, function(txt)
+        Webhook.Url = txt; saveSettings()
+    end)
+
+    sec:Button("Test Webhook", function()
+        if Webhook.Url == "" then
+            win:luluNotify("Input URL first!", "warning"); return
+        end
+        sendWebhook("[LuluXGAG] Test Webhook! " .. SCRIPT_VERSION)
+        win:luluNotify("Webhook Test send!", "success")
+    end)
+
+    sec:Toggle("Webhook Auto KG", Webhook.KG, function(on)
+        Webhook.KG = on; saveSettings()
+    end)
+
+    sec:Toggle("Webhook Auto Leveling", Webhook.LV, function(on)
+        Webhook.LV = on; saveSettings()
+    end)
+end)
+
+tabMisc:Accordion("Panel Settings", function(sec)
+    sec:Toggle("Show Info Panel", State.ShowInfo, function(on)
+        State.ShowInfo = on; saveSettings()
+        if on then info:Show() else info:Hide() end
+    end)
+
+    sec:Toggle("Detailed Info", State.DetailInfo, function(on)
+        State.DetailInfo = on; saveSettings()
+    end)
+
+    sec:Toggle("Show Progress Panel", State.ShowProgress, function(on)
+        State.ShowProgress = on; saveSettings()
+        if not on then grpOnProgress:Hide() end
+    end)
+
+    sec:Toggle("Show Blessing Panel", State.ShowBlessing, function(on)
+        State.ShowBlessing = on; saveSettings()
+        if not on then grpJumbo:Hide() end
+    end)
+
+    sec:Toggle("Show PnP Panel", State.ShowPnp, function(on)
+        State.ShowPnp = on; saveSettings()   -- FIX 7: hapus > liar
+        if not on then grpPnp:Hide() end
+    end)
+
+    sec:Toggle("Show All Progress", State.ShowAllProg, function(on)
+        State.ShowAllProg = on; saveSettings()
+        if not on then grpAllProgress:Hide() end
+    end)
+end)
+
+-- TAB: PERFORMANCE
+local tabPerf = win:Tab("Performance")
+
+tabPerf:Accordion("Disable Effects", function(sec)
+    sec:Toggle("Disable Spider Web FX", Lag.Spider, function(on)   -- FIX 8
+        Lag.Spider = on; saveSettings()
+        if on then startSpiderRemover() else stopSpiderRemover() end
+    end)
+
+    sec:Toggle("Disable Pets Physics", Lag.Pets, function(on)      -- FIX 8
+        Lag.Pets = on; saveSettings()
+        if on then startPetsRemover() else stopPetsRemover() end
+    end)
+
+    sec:Toggle("Disable Spotted Effect", Lag.Spotted, function(on)
+        Lag.Spotted = on; saveSettings()
+        if on then startSpottedRemover() else stopSpottedRemover() end
+    end)
+
+    sec:Toggle("Disable 3D Render", State.Disable3D, function(on)
+        State.Disable3D = on; saveSettings()
+        pcall(function()
+            game:GetService("RunService"):Set3dRenderingEnabled(not on)
+        end)
+    end)
+end)
+
+tabPerf:Accordion("Optimization", function(sec)
+    sec:Button("Light Reduce", function()
+        RedMid()
+        win:luluNotify("Light Reduce ACTIVE", "success")
+    end)
+
+    sec:Button("Ultra Reduce", function()
+        pomid()
+        win:luluNotify("Ultra Reduce ACTIVE", "success")
+    end)
+end)
+
+tabPerf:Accordion("Remove Objects", function(sec)
+    sec:Button("Remove SneakPeek", function()
+        if removeSneakPeek() then
+            win:luluNotify("SneakPeek removed", "success")
+        else
+            win:luluNotify("SneakPeek has removed", "error")
+        end
+    end)
+
+    sec:Button("Remove Other Garden", function()
+        if removeOtherGarden() then
+            win:luluNotify("Garden removed", "success")
+        else
+            win:luluNotify("Other garden has remove", "error")
+        end
+    end)
+end)
+
+task.defer(function()
+    refreshAll()
+    rebuildConfigDropdowns()
+end)
