@@ -5,7 +5,7 @@ local LuluUI = loadstring(game:HttpGet(
 -- ============================================================
 -- SERVICES
 -- ============================================================
-local SCRIPT_VERSION    = "vDev"
+local SCRIPT_VERSION    = "vDev-Fixed6"
 local Players           = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local HttpService       = game:GetService("HttpService")
@@ -255,8 +255,9 @@ local lvLv2           = {}
 local lvStatus        = {}
 local lvDoneUUIDs     = {}
 local lvTargetAge     = 100
-local lvAllDone       = false
-local lvFromKG        = false
+local lvAllDone            = false
+local lvFromKG             = false
+local lvCompletedNaturally = false  -- FIX6: guard supaya SetState(true) ga trigger start-callback
 
 -- KG cache
 local kgLastKnown    = {}
@@ -541,7 +542,7 @@ local ddKGTarget, ddKGLv1, ddKGLv2, ddKGUpKG
 local ddLVTarget, ddLVLv1, ddLVLv2
 local ddPnPOnSkill, ddPnPAfterSkill
 local ddSaveConfigSelect, ddDeleteConfig, inpConfigName, inpWebhookUrl
-local tglKGStart
+local tglKGStart, tglLVStart
 
 -- ============================================================
 -- SETTINGS SAVE / LOAD
@@ -1798,7 +1799,11 @@ local function kgStartLoop()
                 if not lvRunning then
                     lvRunning = true
                     lvAllDone = false
+                    -- FIX6: hanya update UI kalau kita yang nyalain (toggle sebelumnya OFF)
+                    lvCompletedNaturally = true
+                    pcall(function() if tglLVStart then tglLVStart:SetState(true) end end)
                 end
+                -- kalau sudah ON sebelumnya → langsung spawn, toggle tidak disentuh
                 task.spawn(triggerLVAfterKG)
             end
         end
@@ -2416,9 +2421,14 @@ tabMain:Accordion("Auto Leveling", function(sec)
         lvFromKG = on; saveSettings()
     end)
 
-    sec:Toggle("Start Auto Leveling", false, function(on)
+    tglLVStart = sec:Toggle("Start Auto Leveling", false, function(on)
         lvRunning = on
         if on then
+            -- FIX6: kalau LV di-trigger otomatis dari KG selesai, skip init ulang
+            if lvCompletedNaturally then
+                lvCompletedNaturally = false
+                return
+            end
             lvAllDone             = false
             lvDoneUUIDs           = {}
             lvStatus              = {}
