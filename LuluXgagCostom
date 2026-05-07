@@ -257,7 +257,6 @@ local lvDoneUUIDs     = {}
 local lvTargetAge     = 100
 local lvAllDone       = false
 local lvFromKG        = false
-local lvWaitingForKG  = false   -- standby: LV toggle ON, menunggu KG selesai dulu
 
 -- KG cache
 local kgLastKnown    = {}
@@ -542,7 +541,7 @@ local ddKGTarget, ddKGLv1, ddKGLv2, ddKGUpKG
 local ddLVTarget, ddLVLv1, ddLVLv2
 local ddPnPOnSkill, ddPnPAfterSkill
 local ddSaveConfigSelect, ddDeleteConfig, inpConfigName, inpWebhookUrl
-local tglKGStart, tglLVStart
+local tglKGStart
 
 -- ============================================================
 -- SETTINGS SAVE / LOAD
@@ -1427,12 +1426,9 @@ local function triggerLVAfterKG()
         if p then lvStatus[p.uuid] = "waiting" end
     end
     if #lvTargets == 0 then
-        win:luluNotify("LV: tidak ada target — pilih pet di dropdown atau aktifkan Auto Select KG", "warning")
+        win:luluNotify("LV: not have target — chose pet in dropdown or on Auto Select List", "warning")
         lvRunning = false
-        pcall(function() if tglLVStart then tglLVStart:SetState(false) end end)
     else
-        -- set toggle LV ON secara visual (karena user aktifkan dari standby)
-        pcall(function() if tglLVStart then tglLVStart:SetState(true) end end)
         win:luluNotify("KG Done → LV Started! (" .. #lvTargets .. " pets)", "success")
         task.spawn(function() notifyLVStarted(lvTargets, lvTargetAge) end)
         lvStartLoop()
@@ -1445,29 +1441,6 @@ local function kgStartLoop()
 
     kgThread = task.spawn(function()
         unequipAllActive()
-
-        -- Kalau LV dalam standby mode (lvWaitingForKG), update list dengan LV+KG targets
-        if lvWaitingForKG then
-            local seen, merged = {}, {}
-            for _, dn in ipairs(lvManualTargets) do
-                local p = petOf(dn)
-                if p and not seen[p.uuid] then seen[p.uuid] = true; table.insert(merged, dn) end
-            end
-            for _, dn in ipairs(kgTargets) do
-                local p = petOf(dn)
-                if p and not seen[p.uuid] then seen[p.uuid] = true; table.insert(merged, dn) end
-            end
-            lvTargets   = merged
-            lvStatus    = {}
-            lvDoneUUIDs = {}
-            for _, dn in ipairs(lvTargets) do
-                local p = petOf(dn); if p then lvStatus[p.uuid] = "waiting" end
-            end
-            win:luluNotify(
-                "KG Started → LV Standby update: " .. #lvTargets .. " pets (LV + KG list)",
-                "info"
-            )
-        end
 
         local queue = {}
         for _, dn in ipairs(kgTargets) do
@@ -1821,9 +1794,7 @@ local function kgStartLoop()
                     timestamp   = os.date("!%Y-%m-%dT%H:%M:%S"),
                 })
             end
-            if lvFromKG or lvWaitingForKG then
-                -- KG selesai → aktifkan LV (baik dari standby maupun dari trigger langsung)
-                lvWaitingForKG = false
+            if lvFromKG or lvRunning then
                 if not lvRunning then
                     lvRunning = true
                     lvAllDone = false
@@ -1933,8 +1904,6 @@ lvStartLoop = function()
             unequipAllActive()
             task.wait(0.5)
             refreshTargets()
-            -- set toggle LV OFF secara visual
-            pcall(function() if tglLVStart then tglLVStart:SetState(false) end end)
             win:luluNotify("All Your Pets Success Leveling to Age " .. lvTargetAge .. "!", "success")
             if webhookLV then
                 task.spawn(function() notifyAllLVDone() end)
@@ -2056,9 +2025,6 @@ task.spawn(function()
             elseif lvRunning then
                 targets   = lvTargets
                 statusMap = lvStatus
-            elseif lvWaitingForKG then
-                targets   = lvTargets
-                statusMap = lvStatus
             elseif kgAllDone then
                 targets   = kgTargets
                 statusMap = kgStatus
@@ -2084,11 +2050,10 @@ task.spawn(function()
             end
 
             local modeName
-            if kgRunning          then modeName = "Automatelly Up KG"
-            elseif lvRunning      then modeName = "Automatelly Leveling"
-            elseif lvWaitingForKG then modeName = "LV Standby (tunggu KG)"
-            elseif kgAllDone      then modeName = "Up KG Done"
-            elseif lvAllDone      then modeName = "Leveling Done"
+            if kgRunning      then modeName = "Automatelly Up KG"
+            elseif lvRunning  then modeName = "Automatelly Leveling"
+            elseif kgAllDone  then modeName = "Up KG Done"
+            elseif lvAllDone  then modeName = "Leveling Done"
             end
 
             local jumboCount = 0
@@ -2115,8 +2080,8 @@ task.spawn(function()
                     grpOnProgress:QuestLine("Progres", tostring(cntProgres))
                     grpOnProgress:QuestLine("Waiting", tostring(cntWaiting))
                     grpOnProgress:QuestLine("Done",    tostring(cntDone))
-                    if lvWaitingForKG then
-                        grpOnProgress:QuestLine("LV Standby", tostring(#lvTargets) .. " pets")
+                    if kgRunning and lvRunning then
+                        grpOnProgress:QuestLine("LV standby", tostring(#lvTargets) .. " pets")
                     end
                 else
                     grpOnProgress:Hide()
@@ -2257,7 +2222,7 @@ task.spawn(function()
                     end
                     snapParts[#snapParts + 1] = p.uuid .. st .. extra
                 end
-                local lvStandby = lvWaitingForKG and tostring(#lvTargets) or ""
+                local lvStandby = (kgRunning and lvRunning) and tostring(#lvTargets) or ""
                 local snapshot  = table.concat(snapParts, "|") .. lvStandby
 
                 if snapshot ~= allProgressLastStatus then
@@ -2308,9 +2273,9 @@ task.spawn(function()
                         grpAllProgress:QuestLine(label, valueStr)
                     end
 
-                    if lvWaitingForKG then
+                    if kgRunning and lvRunning then
                         grpAllProgress:Divider()
-                        grpAllProgress:QuestLine("LV Standby", #lvTargets .. " pets (tunggu KG)")
+                        grpAllProgress:QuestLine("LV", "standby  " .. #lvTargets .. " pets")
                     end
                 end
                 -- snapshot sama → skip rebuild, tidak ada Clear()+QuestLine() percuma
@@ -2451,14 +2416,14 @@ tabMain:Accordion("Auto Leveling", function(sec)
         lvFromKG = on; saveSettings()
     end)
 
-    tglLVStart = sec:Toggle("Start Auto Leveling", false, function(on)
+    sec:Toggle("Start Auto Leveling", false, function(on)
+        lvRunning = on
         if on then
             lvAllDone             = false
             lvDoneUUIDs           = {}
             lvStatus              = {}
-            allProgressLastStatus = ""
+            allProgressLastStatus = ""     -- FIX 1: force rebuild panel
 
-            -- Kumpulkan manual targets dari dropdown
             local seen, merged = {}, {}
             for _, dn in ipairs(lvManualTargets) do
                 local p = petOf(dn)
@@ -2466,61 +2431,48 @@ tabMain:Accordion("Auto Leveling", function(sec)
                     seen[p.uuid] = true; table.insert(merged, dn)
                 end
             end
-
             if lvFromKG then
-                -- =============================================
-                -- STANDBY MODE: tunggu Auto KG selesai dulu
-                -- =============================================
-                lvRunning      = false
-                lvWaitingForKG = true
-                lvTargets      = merged   -- sementara hanya dari LV list
-                for _, dn in ipairs(lvTargets) do
-                    local p = petOf(dn); if p then lvStatus[p.uuid] = "waiting" end
-                end
-                -- Kalau KG sudah running, langsung update standby list (LV+KG)
                 if kgRunning then
-                    local seenKG = {}
-                    for _, dn in ipairs(lvTargets) do
-                        local p = petOf(dn); if p then seenKG[p.uuid] = true end
-                    end
+                    -- FIX: standby mode — pakai kgTargets (semua antrian KG),
+                    -- bukan kgDoneUUIDs yang masih kosong saat KG belum selesai
                     for _, dn in ipairs(kgTargets) do
                         local p = petOf(dn)
-                        if p and not seenKG[p.uuid] then
-                            seenKG[p.uuid] = true; table.insert(lvTargets, dn)
-                            lvStatus[p.uuid] = "waiting"
+                        if p and not seen[p.uuid] then
+                            seen[p.uuid] = true; table.insert(merged, dn)
+                        end
+                    end
+                else
+                    -- KG sudah selesai — pakai kgDoneUUIDs (pet yg benar-benar done)
+                    for uuid in pairs(kgDoneUUIDs) do
+                        if not seen[uuid] then
+                            seen[uuid] = true
+                            for _, p in ipairs(allPets) do
+                                if p.uuid == uuid then table.insert(merged, p.display); break end
+                            end
                         end
                     end
                 end
-                win:luluNotify(
-                    "LV Standby – menunggu KG selesai | " .. #lvTargets .. " pets",
-                    "info"
-                )
+            end
+            lvTargets = merged
+
+            for _, dn in ipairs(lvTargets) do
+                local p = petOf(dn); if p then lvStatus[p.uuid] = "waiting" end
+            end
+
+            if kgRunning then
+                -- standby: LV menunggu KG selesai, lvTargets sudah terisi
             else
-                -- =============================================
-                -- NORMAL MODE: langsung start tanpa tunggu KG
-                -- =============================================
-                lvRunning      = true
-                lvWaitingForKG = false
-                lvTargets      = merged
-                for _, dn in ipairs(lvTargets) do
-                    local p = petOf(dn); if p then lvStatus[p.uuid] = "waiting" end
-                end
                 if #lvTargets == 0 then
                     lvRunning = false
-                    pcall(function() if tglLVStart then tglLVStart:SetState(false) end end)
-                    win:luluNotify("LV: tidak ada target – pilih pet di dropdown!", "warning")
                 else
                     task.spawn(function() notifyLVStarted(lvTargets, lvTargetAge) end)
                     lvStartLoop()
                 end
             end
         else
-            -- STOP / matiin toggle
-            lvRunning      = false
-            lvWaitingForKG = false
             pcall(function() if lvThread then task.cancel(lvThread) end end)
             lvThread              = nil
-            allProgressLastStatus = ""
+            allProgressLastStatus = ""     -- FIX 1: force rebuild panel
             task.spawn(function()
                 unequipAllActive(); task.wait(0.5); refreshTargets()
             end)
